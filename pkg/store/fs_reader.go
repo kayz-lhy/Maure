@@ -20,16 +20,68 @@ type FsIndexReader struct {
 
 // NewFsIndexReader 创建新的 FsIndexReader。
 func NewFsIndexReader(dir *FSDirectory) (*FsIndexReader, error) {
-	// 加载快照
+	// 加载现有快照
 	snapshot, err := dir.loadSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("load snapshot: %w", err)
 	}
 
-	return &FsIndexReader{
+	reader := &FsIndexReader{
 		dir:      dir,
 		snapshot: snapshot,
-	}, nil
+	}
+
+	// 重放 WAL 中未提交的操作
+	if err := reader.replayWAL(); err != nil {
+		return nil, fmt.Errorf("replay wal: %w", err)
+	}
+
+	return reader, nil
+}
+
+// replayWAL 重放 WAL 中的操作（用于读取未 checkpoint 的数据）。
+func (r *FsIndexReader) replayWAL() error {
+	wal, err := r.dir.WAL()
+	if err != nil {
+		return fmt.Errorf("get wal: %w", err)
+	}
+
+	operations, err := wal.Read()
+	if err != nil {
+		return fmt.Errorf("read wal: %w", err)
+	}
+
+	for _, op := range operations {
+		switch op.Type {
+		case WALOpAdd:
+			// 解压并解码文档
+			docData, err := wal.codec.Decompress(op.DocData)
+			if err != nil {
+				return fmt.Errorf("decompress doc: %w", err)
+			}
+
+			var doc document.Document
+			if err := gob.NewDecoder(bytes.NewReader(docData)).Decode(&doc); err != nil {
+				return fmt.Errorf("decode doc: %w", err)
+			}
+
+			// 添加到快照
+			if _, exists := r.snapshot.Documents[op.DocID]; !exists {
+				r.snapshot.Documents[op.DocID] = &doc
+				if r.snapshot.LastDocID < op.DocID {
+					r.snapshot.LastDocID = op.DocID
+				}
+			}
+
+		case WALOpDelete:
+			delete(r.snapshot.Documents, op.DocID)
+			delete(r.snapshot.FieldLength, op.DocID)
+		}
+	}
+
+	// 更新 DocCount
+	r.snapshot.DocCount = int64(len(r.snapshot.Documents))
+	return nil
 }
 
 // DocCount 返回文档数量。
@@ -152,11 +204,20 @@ func (d *IndexData) ReplayWAL(wal *WAL) error {
 				return fmt.Errorf("decode doc: %w", err)
 			}
 
-			d.Documents[op.DocID] = &doc
+			if _, exists := d.Documents[op.DocID]; !exists {
+				d.Documents[op.DocID] = &doc
+				if d.LastDocID < op.DocID {
+					d.LastDocID = op.DocID
+				}
+				d.DocCount++
+			}
 
 		case WALOpDelete:
-			delete(d.Documents, op.DocID)
-			delete(d.FieldLength, op.DocID)
+			if _, exists := d.Documents[op.DocID]; exists {
+				delete(d.Documents, op.DocID)
+				delete(d.FieldLength, op.DocID)
+				d.DocCount--
+			}
 		}
 	}
 
