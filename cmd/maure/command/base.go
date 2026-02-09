@@ -91,11 +91,6 @@ func (b *BaseCommand) Flags() *flag.FlagSet {
 	return b.flags
 }
 
-// 设置标志集的名称
-func (b *BaseCommand) setName(name string) {
-	b.flags = flag.NewFlagSet(name, flag.ContinueOnError)
-}
-
 // IndexContext 索引操作上下文。
 type IndexContext struct {
 	Dir     store.Directory

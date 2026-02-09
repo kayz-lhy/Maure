@@ -53,7 +53,9 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		ramIdx.Add(doc)
+		if _, err := ramIdx.Add(doc); err != nil {
+			continue
+		}
 	}
 
 	server := &Server{
@@ -100,7 +102,7 @@ func (s *Server) Start() error {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"name":    "Maure Search Engine",
 		"version": Version,
 		"endpoints": map[string]string{
@@ -110,7 +112,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			"add":    "POST /add",
 			"delete": "DELETE /doc/<id>",
 		},
-	})
+	}); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +147,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleDoc(w http.ResponseWriter, r *http.Request) {
@@ -161,15 +167,19 @@ func (s *Server) handleDoc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(doc)
+	if err := json.NewEncoder(w).Encode(doc); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"doc_count":  s.idx.DocCount(),
 		"num_terms":  s.idx.Inverted().NumTerms(),
-	})
+	}); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
@@ -208,10 +218,12 @@ func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"doc_id": docID,
 		"status": "success",
-	})
+	}); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -233,9 +245,11 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
-	})
+	}); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+	}
 }
 
 func init() {

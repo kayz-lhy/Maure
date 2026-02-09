@@ -55,7 +55,9 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		ramIdx.Add(doc)
+		if _, err := ramIdx.Add(doc); err != nil {
+			continue
+		}
 	}
 
 	// 解析查询
@@ -140,7 +142,9 @@ func (c *CountCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		ramIdx.Add(doc)
+		if _, err := ramIdx.Add(doc); err != nil {
+			continue
+		}
 	}
 
 	parsedQuery, err := query.NewQueryParser().Parse(queryStr)
