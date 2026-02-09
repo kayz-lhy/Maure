@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev, feature/*]
   pull_request:
 
 jobs:
@@ -16,11 +16,14 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Run tests
+      - name: Run unit tests
         run: go test -v ./pkg/...
 
+      - name: Run integration tests
+        run: go test -v ./test/...
+
       - name: Run vet
-        run: go vet ./pkg/...
+        run: go vet ./pkg/... ./cmd/...
 
   build:
     runs-on: ubuntu-latest
@@ -33,5 +36,32 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build
-        run: go build -ldflags="-s -w" -o bin/maure ./cmd/maure
+      - name: Build CLI
+        run: |
+          mkdir -p bin
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-darwin-amd64 ./cmd/maure
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-linux-amd64 ./cmd/maure
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-windows-amd64.exe ./cmd/maure
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: maure-binaries
+          path: bin/
+          retention-days: 7
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Run linter
+        run: golangci-lint run ./pkg/... ./cmd/...
