@@ -73,7 +73,9 @@ func (c *Codec) Decode(data []byte, v interface{}) error {
 // ComputeHash 计算数据的 SHA1 哈希。
 func (c *Codec) ComputeHash(data []byte) string {
 	h := sha1.New()
-	h.Write(data)
+	if _, err := h.Write(data); err != nil {
+		return ""
+	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 

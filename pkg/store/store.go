@@ -44,9 +44,9 @@ type Directory interface {
 //
 // IndexWriter 提供文档添加、删除和索引优化操作。
 // 使用流程：
-//   1. 调用 AddDocument 添加文档
-//   2. 可选：调用 Delete 删除文档
-//   3. 调用 Close 提交更改
+//  1. 调用 AddDocument 添加文档
+//  2. 可选：调用 Delete 删除文档
+//  3. 调用 Close 提交更改
 type IndexWriter interface {
 	// AddDocument 添加文档到索引。
 	//
@@ -65,6 +65,9 @@ type IndexWriter interface {
 	// Commit 提交更改并刷新到存储。
 	Commit() error
 
+	// PendingOps 返回待提交的操作数。
+	PendingOps() int
+
 	// Close 关闭写入器并提交更改。
 	Close() error
 }
@@ -79,6 +82,9 @@ type IndexReader interface {
 
 	// Exists 检查文档是否存在。
 	Exists(docID int64) bool
+
+	// GetTerms 获取所有词项。
+	GetTerms() []string
 
 	// Close 释放资源。
 	Close() error
@@ -105,7 +111,7 @@ type IndexInput interface {
 	// ReadString 读取字符串。
 	ReadString() (string, error)
 	// Seek 移动读取位置。
-	Seek(offset int64, whence int) error
+	Seek(offset int64, whence int) (int64, error)
 	// Close 关闭输入流。
 	Close() error
 }
@@ -130,9 +136,9 @@ type PostingsReader interface {
 
 // Postings 倒排表数据。
 type Postings struct {
-	DocIDs    []int64  // 文档 ID 列表
-	Freqs     []int    // 词频列表
-	Positions [][]int  // 位置列表
+	DocIDs    []int64 // 文档 ID 列表
+	Freqs     []int   // 词频列表
+	Positions [][]int // 位置列表
 }
 
 // NewPostings 创建新的倒排表。
