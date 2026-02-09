@@ -82,10 +82,9 @@ func (q *TermQuery) Explain(idx *index.RAMIndex) string {
 
 // PhraseQuery 是短语查询的实现。
 type PhraseQuery struct {
-	terms    []string
-	field    string
-	slop     int  // 词项之间的最大距离
-	boost    float32
+	terms []string
+	slop  int  // 词项之间的最大距离
+	boost float32
 }
 
 // NewPhraseQuery 创建新的短语查询。
