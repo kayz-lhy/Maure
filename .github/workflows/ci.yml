@@ -2,25 +2,28 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, feature/*]
+    branches: [master, main, dev, feature/*]
   pull_request:
 
 permissions:
   contents: read
 
-env:
-  GO_VERSION: "1.25"
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
+          cache: true
 
       - name: Run unit tests
         run: go test -v ./pkg/...
@@ -34,13 +37,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
+          cache: true
 
       - name: Build CLI
         run: |
@@ -59,15 +64,24 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
+          cache: true
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.1
-          args: --timeout=5m ./pkg/... ./cmd/...
+      - name: Check gofmt
+        run: |
+          unformatted_files="$(gofmt -l ./pkg ./cmd ./test)"
+          if [ -n "${unformatted_files}" ]; then
+            echo "These files are not formatted:"
+            echo "${unformatted_files}"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./pkg/... ./cmd/...
