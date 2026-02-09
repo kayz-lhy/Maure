@@ -129,7 +129,7 @@ func (w *WAL) Read() ([]WALOperation, error) {
 	operations := make([]WALOperation, 0)
 
 	// 重置文件位置
-	if _, err := w.file.Seek(0, os.SEEK_SET); err != nil {
+	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("seek: %w", err)
 	}
 
@@ -187,7 +187,7 @@ func (w *WAL) Truncate() error {
 	}
 
 	// 重置位置
-	if _, err := w.file.Seek(0, os.SEEK_SET); err != nil {
+	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek: %w", err)
 	}
 

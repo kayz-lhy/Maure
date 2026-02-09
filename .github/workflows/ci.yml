@@ -2,8 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev, feature/*]
   pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25"
 
 jobs:
   test:
@@ -14,13 +20,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Run tests
+      - name: Run unit tests
         run: go test -v ./pkg/...
 
+      - name: Run integration tests
+        run: go test -v ./test/...
+
       - name: Run vet
-        run: go vet ./pkg/...
+        run: go vet ./pkg/... ./cmd/...
 
   build:
     runs-on: ubuntu-latest
@@ -31,7 +40,34 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Build
-        run: go build -ldflags="-s -w" -o bin/maure ./cmd/maure
+      - name: Build CLI
+        run: |
+          mkdir -p bin
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-darwin-amd64 ./cmd/maure
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-linux-amd64 ./cmd/maure
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/maure-windows-amd64.exe ./cmd/maure
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: maure-binaries
+          path: bin/
+          retention-days: 7
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.1
+          args: --timeout=5m ./pkg/... ./cmd/...

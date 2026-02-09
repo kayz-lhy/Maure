@@ -99,7 +99,10 @@ func (d *FSDirectory) saveManifest() error {
 func (d *FSDirectory) UpdateManifest(fn func(*Manifest)) {
 	d.manifest.UpdatedAt = time.Now().UnixMilli()
 	fn(d.manifest)
-	d.saveManifest()
+	if err := d.saveManifest(); err != nil {
+		// 记录错误但不影响运行
+		fmt.Fprintf(os.Stderr, "Warning: save manifest failed: %v\n", err)
+	}
 }
 
 // CreateIndexWriter 创建索引写入器。
