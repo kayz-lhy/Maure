@@ -57,17 +57,17 @@ func ListCommands() []Command {
 
 // BaseCommand 提供命令的公共功能。
 type BaseCommand struct {
-	flags   *flag.FlagSet
-	usage   string
-	desc    string
+	flags *flag.FlagSet
+	usage string
+	desc  string
 }
 
 // NewBaseCommand 创建基础命令。
 func NewBaseCommand(name, usage, desc string) *BaseCommand {
 	return &BaseCommand{
 		flags: flag.NewFlagSet(name, flag.ContinueOnError),
-		usage:  usage,
-		desc:   desc,
+		usage: usage,
+		desc:  desc,
 	}
 }
 
@@ -93,9 +93,9 @@ func (b *BaseCommand) Flags() *flag.FlagSet {
 
 // IndexContext 索引操作上下文。
 type IndexContext struct {
-	Dir     store.Directory
-	Writer  store.IndexWriter
-	Reader  store.IndexReader
+	Dir      store.Directory
+	Writer   store.IndexWriter
+	Reader   store.IndexReader
 	Analyzer analyzer.Analyzer
 }
 
@@ -132,9 +132,9 @@ func NewIndexContext(path string, opts GlobalOptions) (*IndexContext, error) {
 	}
 
 	return &IndexContext{
-		Dir:     dir,
-		Writer:  writer,
-		Reader:  reader,
+		Dir:      dir,
+		Writer:   writer,
+		Reader:   reader,
 		Analyzer: ana,
 	}, nil
 }

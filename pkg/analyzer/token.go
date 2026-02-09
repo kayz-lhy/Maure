@@ -8,13 +8,13 @@ package analyzer
 //
 // Token 是文本分词后的最小单位，包含词项文本、位置信息和其他属性。
 type Token struct {
-	Text       string // 词项文本
-	Start      int    // 在原文中的起始位置
-	End        int    // 在原文中的结束位置
-	Position   int    // 词项在词流中的位置
-	FieldName  string // 所属字段名称
-	Type       TokenType // 词项类型
-	Flags      TokenFlags // 附加标志
+	Text      string     // 词项文本
+	Start     int        // 在原文中的起始位置
+	End       int        // 在原文中的结束位置
+	Position  int        // 词项在词流中的位置
+	FieldName string     // 所属字段名称
+	Type      TokenType  // 词项类型
+	Flags     TokenFlags // 附加标志
 }
 
 // TokenType 表示词项类型。

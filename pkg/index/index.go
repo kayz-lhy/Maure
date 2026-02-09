@@ -6,10 +6,10 @@ package index
 
 import (
 	"errors"
-	"sort"
 	"maure/pkg/analyzer"
 	"maure/pkg/document"
 	"maure/pkg/search"
+	"sort"
 	"sync"
 )
 
@@ -47,9 +47,9 @@ type Index interface {
 // RAMIndex 是基于内存的索引实现。
 type RAMIndex struct {
 	mu         sync.RWMutex
-	inverted   *InvertedIndex       // 倒排索引
-	analyzer   analyzer.Analyzer    // 分析器
-	similarity search.Similarity   // 评分算法
+	inverted   *InvertedIndex    // 倒排索引
+	analyzer   analyzer.Analyzer // 分析器
+	similarity search.Similarity // 评分算法
 	closed     bool
 }
 
@@ -240,9 +240,9 @@ type Query interface {
 
 // TermQuery 是词项查询。
 type TermQuery struct {
-	Term     string
-	Field    string
-	Boost    float32
+	Term  string
+	Field string
+	Boost float32
 }
 
 // NewTermQuery 创建新的 TermQuery。
@@ -298,7 +298,7 @@ func (q *TermQuery) Search(idx *RAMIndex) ([]ScoreDoc, error) {
 	}
 
 	// 按评分降序排序
-	sort.Sort(sort.Reverse(ScoreDocs(results)))
+	sort.Sort(ScoreDocs(results))
 
 	return results, nil
 }

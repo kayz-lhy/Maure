@@ -229,6 +229,57 @@ func TestRAMIndex_NumTerms(t *testing.T) {
 	idx.Close()
 }
 
+func TestRAMIndex_PostingsAggregatedPerDoc(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("content", "go go gopher"))
+	if _, err := idx.Add(doc); err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	postings, err := idx.inverted.GetPostings("go")
+	if err != nil {
+		t.Fatalf("expected postings for go: %v", err)
+	}
+	if len(postings.DocIDs) != 1 {
+		t.Fatalf("expected one posting entry for single doc, got %d", len(postings.DocIDs))
+	}
+	if postings.Freqs[0] != 2 {
+		t.Fatalf("expected term freq 2, got %d", postings.Freqs[0])
+	}
+	if len(postings.Positions[0]) != 2 || postings.Positions[0][0] != 0 || postings.Positions[0][1] != 1 {
+		t.Fatalf("unexpected positions: %v", postings.Positions[0])
+	}
+
+	results, err := idx.Search(NewTermQuery("go"), 10)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected deduplicated one result, got %d", len(results))
+	}
+}
+
+func TestRAMIndex_FieldLengthUsesTokenCountOnly(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("content", "go gopher"))
+	doc.Add(document.NewStringField("id", "DOC-001"))
+
+	docID, err := idx.Add(doc)
+	if err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	if got := idx.inverted.FieldLength(docID); got != 2 {
+		t.Fatalf("expected tokenized field length 2, got %d", got)
+	}
+}
+
 func BenchmarkRAMIndex_Add(b *testing.B) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	doc := document.NewDocument()

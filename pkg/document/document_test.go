@@ -166,8 +166,8 @@ func TestDocumentID(t *testing.T) {
 
 func TestFieldType(t *testing.T) {
 	tests := []struct {
-		ft        FieldType
-		expected  string
+		ft       FieldType
+		expected string
 	}{
 		{FieldTypeText, "text"},
 		{FieldTypeString, "string"},

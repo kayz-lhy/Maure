@@ -33,9 +33,10 @@ type Similarity interface {
 // TFIDFSimilarity 实现了 TF-IDF 评分算法。
 //
 // TF-IDF 是经典的向量空间模型评分算法：
-//   TF(t,d) = sqrt(词项 t 在文档 d 中的频率)
-//   IDF(t) = log(总文档数 / 包含 t 的文档数)
-//   Score = TF(t,d) * IDF(t)
+//
+//	TF(t,d) = sqrt(词项 t 在文档 d 中的频率)
+//	IDF(t) = log(总文档数 / 包含 t 的文档数)
+//	Score = TF(t,d) * IDF(t)
 //
 // 特点：
 //   - 简单直观，易于理解
@@ -71,11 +72,13 @@ func (s *TFIDFSimilarity) Name() string {
 // BM25Similarity 实现了 BM25 评分算法。
 //
 // BM25 是 Okapi BM25，是一种基于概率模型的评分算法：
-//   Score = IDF(t) * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
+//
+//	Score = IDF(t) * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
 //
 // 参数说明：
-//   k1：词频饱和度参数，通常 1.2-2.0
-//   b：文档长度归一化参数，通常 0.75
+//
+//	k1：词频饱和度参数，通常 1.2-2.0
+//	b：文档长度归一化参数，通常 0.75
 //
 // 特点：
 //   - 对词频有饱和处理（不会无限增长）
@@ -180,9 +183,9 @@ func (s *BM25L) Name() string {
 
 // CollectionStatistics 收集索引的统计信息。
 type CollectionStatistics struct {
-	NumDocs      int64            // 文档总数
-	AvgDocLength float64          // 平均文档长度
-	FieldLengths map[int64]int    // 每个文档的长度
+	NumDocs      int64                      // 文档总数
+	AvgDocLength float64                    // 平均文档长度
+	FieldLengths map[int64]int              // 每个文档的长度
 	Postings     map[string]*store.Postings // 词项倒排表
 }
 

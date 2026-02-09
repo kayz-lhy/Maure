@@ -25,12 +25,12 @@ import (
 //   - Freqs: 每个文档中词项的出现频率
 //   - Positions: 每个文档中词项的位置列表
 type InvertedIndex struct {
-	mu           sync.RWMutex
-	terms        map[string]*store.Postings
-	docCount     int64
-	nextDocID    int64
-	fieldLength  map[int64]int      // 文档字段长度
-	analyzer     analyzer.Analyzer   // 分析器实例（复用）
+	mu          sync.RWMutex
+	terms       map[string]*store.Postings
+	docCount    int64
+	nextDocID   int64
+	fieldLength map[int64]int     // 文档字段长度
+	analyzer    analyzer.Analyzer // 分析器实例（复用）
 }
 
 // NewInvertedIndex 创建新的倒排索引。
@@ -48,9 +48,9 @@ func NewInvertedIndex() *InvertedIndex {
 // AddDocument 添加文档到索引。
 //
 // 流程：
-//   1. 分析文档的所有字段
-//   2. 对每个分词后的词项，更新倒排表
-//   3. 记录词项在文档中的位置
+//  1. 分析文档的所有字段
+//  2. 对每个分词后的词项，更新倒排表
+//  3. 记录词项在文档中的位置
 func (idx *InvertedIndex) AddDocument(doc *document.Document) (int64, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -58,47 +58,16 @@ func (idx *InvertedIndex) AddDocument(doc *document.Document) (int64, error) {
 	docID := idx.nextDocID
 	idx.nextDocID++
 
-	// 记录每个字段的长度
-	totalLength := 0
-
-	// 处理每个字段
-	for _, field := range doc.Fields {
-		if !field.Indexed {
-			continue
+	termStats, totalLength := store.AnalyzeDocument(doc, idx.analyzer)
+	for term, stat := range termStats {
+		p, ok := idx.terms[term]
+		if !ok {
+			p = store.NewPostings()
+			idx.terms[term] = p
 		}
-
-		var tokens []*analyzer.Token
-		if field.Tokenized {
-			// 使用复用分析器实例
-			stream := idx.analyzer.Analyze(field.Name, field.StringValue())
-			for stream.Next() {
-				tokens = append(tokens, stream.Current())
-			}
-			stream.Close()
-		} else {
-			// 不分词的字段，整个值作为一个词项
-			tokens = []*analyzer.Token{{
-				Text:     field.StringValue(),
-				Position: 0,
-				Type:     analyzer.TokenTypeWord,
-			}}
-		}
-
-		// 更新倒排表
-		for i, token := range tokens {
-			term := token.Text
-
-			p, ok := idx.terms[term]
-			if !ok {
-				p = store.NewPostings()
-				idx.terms[term] = p
-			}
-			p.DocIDs = append(p.DocIDs, docID)
-			p.Freqs = append(p.Freqs, 1)
-			p.Positions = append(p.Positions, []int{i})
-		}
-
-		totalLength += len(tokens)
+		p.DocIDs = append(p.DocIDs, docID)
+		p.Freqs = append(p.Freqs, stat.Freq)
+		p.Positions = append(p.Positions, stat.Positions)
 	}
 
 	idx.fieldLength[docID] = totalLength
@@ -121,19 +90,20 @@ func (idx *InvertedIndex) Delete(docID int64) error {
 
 	// 从每个词项的倒排表中移除该文档
 	for term, p := range idx.terms {
-		for i, d := range p.DocIDs {
+		removed := false
+		for i := len(p.DocIDs) - 1; i >= 0; i-- {
+			d := p.DocIDs[i]
 			if d == docID {
 				// 移除该文档
 				p.DocIDs = append(p.DocIDs[:i], p.DocIDs[i+1:]...)
 				p.Freqs = append(p.Freqs[:i], p.Freqs[i+1:]...)
 				p.Positions = append(p.Positions[:i], p.Positions[i+1:]...)
-
-				// 如果倒排表为空，标记为删除
-				if len(p.DocIDs) == 0 {
-					emptyTerms = append(emptyTerms, term)
-				}
-				break
+				removed = true
 			}
+		}
+		// 如果倒排表为空，标记为删除
+		if removed && len(p.DocIDs) == 0 {
+			emptyTerms = append(emptyTerms, term)
 		}
 	}
 
