@@ -1,6 +1,7 @@
 package query
 
 import (
+	"fmt"
 	"maure/pkg/index"
 	"maure/pkg/store"
 	"strings"
@@ -76,12 +77,7 @@ func (q *TermQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 
 // Explain 实现了 Query 接口。
 func (q *TermQuery) Explain(idx *index.RAMIndex) string {
-	return "TermQuery(term=" + q.Term + ", boost=" + f32toa(q.Boost) + ")"
-}
-
-// f32toa 将 float32 转换为字符串。
-func f32toa(f float32) string {
-	return string(rune(int(f)))
+	return fmt.Sprintf("TermQuery(term=%s, boost=%.4f)", q.Term, q.Boost)
 }
 
 // PhraseQuery 是短语查询的实现。
@@ -94,8 +90,13 @@ type PhraseQuery struct {
 
 // NewPhraseQuery 创建新的短语查询。
 func NewPhraseQuery(terms ...string) *PhraseQuery {
+	// 自动转小写以匹配索引
+	lowerTerms := make([]string, len(terms))
+	for i, term := range terms {
+		lowerTerms[i] = strings.ToLower(term)
+	}
 	return &PhraseQuery{
-		terms: terms,
+		terms: lowerTerms,
 		slop:  0,
 		boost: 1.0,
 	}

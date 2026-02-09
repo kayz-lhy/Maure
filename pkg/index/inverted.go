@@ -25,21 +25,24 @@ import (
 //   - Freqs: 每个文档中词项的出现频率
 //   - Positions: 每个文档中词项的位置列表
 type InvertedIndex struct {
-	mu          sync.RWMutex
-	terms       map[string]*store.Postings
-	docCount    int64
-	nextDocID   int64
-	fieldLength map[int64]int // 文档字段长度
+	mu           sync.RWMutex
+	terms        map[string]*store.Postings
+	docCount     int64
+	nextDocID    int64
+	fieldLength  map[int64]int      // 文档字段长度
+	analyzer     analyzer.Analyzer   // 分析器实例（复用）
 }
 
 // NewInvertedIndex 创建新的倒排索引。
 func NewInvertedIndex() *InvertedIndex {
-	return &InvertedIndex{
+	idx := &InvertedIndex{
 		terms:       make(map[string]*store.Postings),
 		docCount:    0,
 		nextDocID:   1,
 		fieldLength: make(map[int64]int),
+		analyzer:    analyzer.NewStandardAnalyzer(),
 	}
+	return idx
 }
 
 // AddDocument 添加文档到索引。
@@ -66,9 +69,8 @@ func (idx *InvertedIndex) AddDocument(doc *document.Document) (int64, error) {
 
 		var tokens []*analyzer.Token
 		if field.Tokenized {
-			// 使用分析器分词
-			analyzerInstance := analyzer.NewStandardAnalyzer()
-			stream := analyzerInstance.Analyze(field.Name, field.StringValue())
+			// 使用复用分析器实例
+			stream := idx.analyzer.Analyze(field.Name, field.StringValue())
 			for stream.Next() {
 				tokens = append(tokens, stream.Current())
 			}

@@ -82,8 +82,8 @@ func TestDemo_IndexAndInvertedIndex(t *testing.T) {
 	fmt.Println("5. 词项查询示例：")
 
 	queries := []struct {
-		term    string
-		desc    string
+		term string
+		desc string
 	}{
 		{"fox", "查询 'fox'"},
 		{"programming", "查询 'programming'"},

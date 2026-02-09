@@ -87,7 +87,7 @@ type BM25Similarity struct {
 }
 
 // DefaultBM25Params BM25 的默认参数。
-const DefaultBM25Params = 1.2
+const DefaultBM25Params float32 = 1.2
 
 // NewBM25Similarity 创建新的 BM25 评分器。
 func NewBM25Similarity() *BM25Similarity {

@@ -9,6 +9,7 @@ package query
 
 import (
 	"maure/pkg/index"
+	"sort"
 )
 
 // Query 是所有查询类型的接口。
@@ -58,8 +59,7 @@ func (op BooleanOperator) String() string {
 //   - OR 查询：go | python（包含 go 或 python）
 //   - NOT 查询：programming -java（包含 programming 但不包含 java）
 type BooleanQuery struct {
-	clauses   []BooleanClause // 查询子句
-	minimum   int           // 最小匹配数量（用于 AND/OR）
+	clauses []BooleanClause // 查询子句
 }
 
 // BooleanClause 表示布尔查询中的一个子句。
@@ -99,7 +99,6 @@ func (o Occur) String() string {
 func NewBooleanQuery() *BooleanQuery {
 	return &BooleanQuery{
 		clauses: make([]BooleanClause, 0),
-		minimum: 1,
 	}
 }
 
@@ -110,11 +109,6 @@ func (q *BooleanQuery) Add(subQuery Query, occur Occur, boost float32) {
 		occur: occur,
 		boost: boost,
 	})
-}
-
-// SetMinimum 设置最小匹配数量。
-func (q *BooleanQuery) SetMinimum(min int) {
-	q.minimum = min
 }
 
 // Search 实现了 Query 接口。
@@ -263,16 +257,11 @@ func (q *BooleanQuery) Explain(idx *index.RAMIndex) string {
 	return result
 }
 
-// sortResults 按评分降序排序结果。
+// sortResults 按评分降序排序结果（使用快速排序）。
 func sortResults(results []index.ScoreDoc) {
-	// 简单冒泡排序（数量少时够用）
-	for i := 0; i < len(results)-1; i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].Score > results[i].Score {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
 }
 
 // DisjunctionQuery 是 OR 查询的实现。

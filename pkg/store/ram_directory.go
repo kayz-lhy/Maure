@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"maure/pkg/document"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -192,6 +194,11 @@ func (w *RAMIndexWriter) Commit() error {
 	return nil
 }
 
+// PendingOps 实现了 IndexWriter 接口。
+func (w *RAMIndexWriter) PendingOps() int {
+	return 0
+}
+
 // Close 实现了 IndexWriter 接口。
 func (w *RAMIndexWriter) Close() error {
 	w.mu.Lock()
@@ -243,6 +250,86 @@ func (r *RAMIndexReader) Exists(docID int64) bool {
 	defer r.mu.RUnlock()
 	docName := "doc-" + itoa(docID)
 	return r.dir.Exists(docName)
+}
+
+// GetTerms 实现了 IndexReader 接口。
+func (r *RAMIndexReader) GetTerms() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// 从存储的文档中提取所有词项
+	termsSet := make(map[string]bool)
+	termPositions := make(map[string]int) // 记录位置信息
+
+	for name, data := range r.dir.files {
+		if !hasPrefix(name, "doc-") {
+			continue
+		}
+
+		// 解析文档数据
+		doc, err := documentRead(bytes.NewReader(data))
+		if err != nil {
+			continue
+		}
+
+		// 提取所有索引字段中的词项
+		for _, field := range doc.Fields {
+			if !field.Indexed {
+				continue
+			}
+
+			// 简单分词
+			text := field.StringValue()
+			words := extractTerms(text)
+			for pos, term := range words {
+				if _, exists := termsSet[term]; !exists {
+					termsSet[term] = true
+					termPositions[term] = pos
+				}
+			}
+		}
+	}
+
+	// 转换为切片并按位置排序
+	terms := make([]string, 0, len(termsSet))
+	// 按首次出现位置排序
+	type termPos struct {
+		term string
+		pos  int
+	}
+	termList := make([]termPos, 0, len(termsSet))
+	for term := range termsSet {
+		termList = append(termList, termPos{term: term, pos: termPositions[term]})
+	}
+	// 按位置排序
+	sort.Slice(termList, func(i, j int) bool {
+		return termList[i].pos < termList[j].pos
+	})
+	for _, tp := range termList {
+		terms = append(terms, tp.term)
+	}
+
+	return terms
+}
+
+// extractTerms 从文本中提取词项（简单分词）。
+func extractTerms(text string) []string {
+	words := make([]string, 0)
+	word := ""
+	for _, c := range text {
+		if c == ' ' || c == ',' || c == '.' || c == '\t' || c == '\n' || c == '(' || c == ')' {
+			if len(word) > 0 {
+				words = append(words, strings.ToLower(word))
+				word = ""
+			}
+		} else {
+			word += string(c)
+		}
+	}
+	if len(word) > 0 {
+		words = append(words, strings.ToLower(word))
+	}
+	return words
 }
 
 // Close 实现了 IndexReader 接口。
@@ -350,7 +437,7 @@ func (i *RAMIndexInput) ReadString() (string, error) {
 }
 
 // Seek 移动读取位置。
-func (i *RAMIndexInput) Seek(offset int64, whence int) error {
+func (i *RAMIndexInput) Seek(offset int64, whence int) (int64, error) {
 	var newPos int
 	switch whence {
 	case io.SeekStart:
@@ -360,13 +447,13 @@ func (i *RAMIndexInput) Seek(offset int64, whence int) error {
 	case io.SeekEnd:
 		newPos = i.limit + int(offset)
 	default:
-		return errors.New("invalid whence")
+		return 0, errors.New("invalid whence")
 	}
 	if newPos < 0 || newPos > i.limit {
-		return errors.New("seek out of range")
+		return 0, errors.New("seek out of range")
 	}
 	i.pos = newPos
-	return nil
+	return int64(newPos), nil
 }
 
 // Close 关闭输入流。

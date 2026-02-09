@@ -52,7 +52,7 @@ func TestDemo_Scoring(t *testing.T) {
 
 	// 文档4：长文档，多次提到 "programming"
 	doc4 := document.NewDocumentWithValues("doc4", map[string]interface{}{
-		"title":   "Advanced Programming Patterns",
+		"title": "Advanced Programming Patterns",
 		"content": "This document covers advanced programming patterns, programming best practices, " +
 			"and programming techniques for experienced developers. " +
 			"If you want to improve your programming skills, this guide is for you.",
