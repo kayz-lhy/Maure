@@ -5,6 +5,12 @@ on:
     branches: [main, dev, feature/*]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Run unit tests
         run: go test -v ./pkg/...
@@ -34,7 +40,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Build CLI
         run: |
@@ -51,17 +57,17 @@ jobs:
           retention-days: 7
 
   lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-      - name: Run linter
-        run: golangci-lint run ./pkg/... ./cmd/...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.1
+          args: --timeout=5m ./pkg/... ./cmd/...
