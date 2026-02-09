@@ -1,0 +1,42 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Test binary
+a.out
+
+# Coverage
+coverage.out
+coverage.html
+*.prof
+*.coverprofile
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go
+go.work
+go.work.sum
+
+# Build
+*.test
+*.test.exe
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# OS
+Thumbs.db

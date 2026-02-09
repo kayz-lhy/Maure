@@ -1,0 +1,39 @@
+name: Sync Templates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  sync-templates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List changed templates
+        id: changes
+        run: |
+          echo "changed=$(git diff --name-only HEAD~1 -- '.github/**' | tr '\n' ',')" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Show changes
+        run: |
+          echo "Changed files: ${{ steps.changes.outputs.changed }}"
+
+      - name: Create issue for template update
+        if: contains(steps.changes.outputs.changed, '.github/ISSUE_TEMPLATE')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Template Updated',
+              body: 'Issue template was updated. Please review.',
+              labels: ['template']
+            })
