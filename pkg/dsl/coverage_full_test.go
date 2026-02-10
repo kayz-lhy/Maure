@@ -311,6 +311,25 @@ func TestInferRangeKindAndTimeParse(t *testing.T) {
 	}
 }
 
+func TestSplitRangeBounds(t *testing.T) {
+	l, u, ok := splitRangeBounds("100 TO 200")
+	if !ok || l != "100" || u != "200" {
+		t.Fatalf("unexpected split result: %v %q %q", ok, l, u)
+	}
+
+	l, u, ok = splitRangeBounds(" 2026-01-01T00:00:00Z   to   2026-02-01T00:00:00Z ")
+	if !ok || l != "2026-01-01T00:00:00Z" || u != "2026-02-01T00:00:00Z" {
+		t.Fatalf("unexpected case-insensitive split: %v %q %q", ok, l, u)
+	}
+
+	bad := []string{"", "100 200", "TO 200", "100 TO"}
+	for _, in := range bad {
+		if _, _, ok := splitRangeBounds(in); ok {
+			t.Fatalf("expected split fail for %q", in)
+		}
+	}
+}
+
 func TestTokenizeBranches(t *testing.T) {
 	if got := tokenize(""); got != nil {
 		t.Fatalf("expected nil for empty tokenize, got %v", got)

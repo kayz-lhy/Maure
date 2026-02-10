@@ -57,6 +57,8 @@ Thumbs.db
 .env
 .cache/
 .codex/
+pkg/dsl/testdata/fuzz/
+pkg/query/testdata/fuzz/
 
 # Local note workspace artifacts
 docs/notes/.obsidian/workspace.json

@@ -272,7 +272,7 @@ func (s *state) parsePrimary() (Expr, error) {
 		return expr, nil
 	}
 
-	if strings.HasPrefix(tok, `"`) && strings.HasSuffix(tok, `"`) {
+	if len(tok) >= 2 && strings.HasPrefix(tok, `"`) && strings.HasSuffix(tok, `"`) {
 		text := tok[1 : len(tok)-1]
 		return PhraseExpr{Text: text}, nil
 	}
@@ -333,13 +333,10 @@ func parseFieldExpression(tok string) (Expr, bool, error) {
 			return nil, false, fmt.Errorf("invalid range syntax: %s", tok)
 		}
 		content := expr[1 : len(expr)-1]
-		upperContent := strings.ToUpper(content)
-		idx := strings.Index(upperContent, " TO ")
-		if idx < 0 {
+		lower, upper, ok := splitRangeBounds(content)
+		if !ok {
 			return nil, false, fmt.Errorf("range query must contain TO: %s", tok)
 		}
-		lower := strings.TrimSpace(content[:idx])
-		upper := strings.TrimSpace(content[idx+4:])
 		if lower == "" || upper == "" {
 			return nil, false, fmt.Errorf("invalid range bounds: %s", tok)
 		}
@@ -408,6 +405,26 @@ func parseRangeTime(value string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unsupported time format: %s", value)
+}
+
+func splitRangeBounds(content string) (string, string, bool) {
+	fields := strings.Fields(content)
+	if len(fields) < 3 {
+		return "", "", false
+	}
+	toIdx := -1
+	for i, f := range fields {
+		if strings.EqualFold(f, "TO") {
+			toIdx = i
+			break
+		}
+	}
+	if toIdx <= 0 || toIdx >= len(fields)-1 {
+		return "", "", false
+	}
+	lower := strings.Join(fields[:toIdx], " ")
+	upper := strings.Join(fields[toIdx+1:], " ")
+	return lower, upper, true
 }
 
 func tokenize(s string) []string {

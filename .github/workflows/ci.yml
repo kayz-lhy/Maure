@@ -28,6 +28,16 @@ jobs:
       - name: Run unit tests
         run: go test -v ./pkg/...
 
+      - name: Run DSL regression smoke
+        run: |
+          go test -v -run TestDSLRegressionCases ./pkg/query
+          go test -v -run TestDSLBooleanCombinations_NoParseRegression ./pkg/query
+
+      - name: Run DSL fuzz smoke
+        run: |
+          go test -run=^$ -fuzz=FuzzParse -fuzztime=10s ./pkg/dsl
+          go test -run=^$ -fuzz=FuzzParsePlan -fuzztime=10s ./pkg/query
+
       - name: Run integration tests
         run: go test -v ./test/...
 

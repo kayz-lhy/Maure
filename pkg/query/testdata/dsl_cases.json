@@ -12,6 +12,12 @@
     "expect_error": false
   },
   {
+    "name": "time_range_exclusive",
+    "query": "timestamp:{2026-02-10T09:15:00Z TO 2026-02-10T10:30:00Z}",
+    "expect_doc_ids": [2],
+    "expect_error": false
+  },
+  {
     "name": "wildcard_prefix",
     "query": "title:iph*",
     "expect_doc_ids": [1],
@@ -30,14 +36,56 @@
     "expect_error": false
   },
   {
-    "name": "scope_limit_sort_parse_only",
-    "query": "@v1 IN index(\"app\") price:[100 TO 300] LIMIT 0,20 SORT BY timestamp DESC",
+    "name": "or_range",
+    "query": "price:[100 TO 200] OR title:android*",
     "expect_doc_ids": [1, 3],
+    "expect_error": false
+  },
+  {
+    "name": "and_with_phrase",
+    "query": "\"iphone 15\" AND price:[100 TO 300]",
+    "expect_doc_ids": [1],
+    "expect_error": false
+  },
+  {
+    "name": "implicit_and",
+    "query": "price:[100 TO 300] title:iph*",
+    "expect_doc_ids": [1],
+    "expect_error": false
+  },
+  {
+    "name": "not_prefix",
+    "query": "NOT title:iph*",
+    "expect_doc_ids": [],
+    "expect_error": false
+  },
+  {
+    "name": "with_version_scope_limit_sort",
+    "query": "@v1 IN index(\"app\") price:[100 TO 500] LIMIT 0,20 SORT BY timestamp DESC",
+    "expect_doc_ids": [1, 2, 3],
+    "expect_error": false
+  },
+  {
+    "name": "with_multi_scope",
+    "query": "@v1 IN index(\"app\"),index(\"ops\") name:roam~1",
+    "expect_doc_ids": [1, 2, 3],
+    "expect_error": false
+  },
+  {
+    "name": "date_only_range",
+    "query": "timestamp:[2026-02-10 TO 2026-02-10]",
+    "expect_doc_ids": [],
     "expect_error": false
   },
   {
     "name": "reject_leading_wildcard",
     "query": "title:*phone",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_mid_wildcard",
+    "query": "title:ip*one",
     "expect_doc_ids": [],
     "expect_error": true
   },
@@ -50,6 +98,24 @@
   {
     "name": "reject_invalid_range",
     "query": "price:[100 300]",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_invalid_scope",
+    "query": "IN index(app) price:[100 TO 300]",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_invalid_limit",
+    "query": "price:[100 TO 300] LIMIT 0",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_missing_by",
+    "query": "price:[100 TO 300] SORT ts DESC",
     "expect_doc_ids": [],
     "expect_error": true
   }
