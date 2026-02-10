@@ -41,6 +41,7 @@ Commands:
   add <file>         添加文件到索引
   add-dir <dir>      批量添加目录
   import <file>      从 JSON 导入
+  parse-log <file>   解析日志并导入
   delete-doc <id>    删除文档
   list [path]        列出所有文档
 
@@ -55,10 +56,11 @@ Commands:
 Examples:
   %s init ./myindex
   %s add ./docs/file.txt
+  %s parse-log ./logs/app.log --format=auto
   %s search "golang tutorial"
   %s serve
 
-`, os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+`, os.Args[0], os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 	}
 
 	flag.Parse()
