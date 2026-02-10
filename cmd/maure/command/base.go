@@ -13,7 +13,7 @@ import (
 )
 
 // Version CLI 版本号。
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 // 全局选项
 type GlobalOptions struct {

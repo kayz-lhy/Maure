@@ -57,3 +57,7 @@ Thumbs.db
 .env
 .cache/
 .codex/
+
+# Local note workspace artifacts
+docs/notes/.obsidian/workspace.json
+docs/notes/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
