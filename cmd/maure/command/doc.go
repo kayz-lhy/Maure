@@ -308,7 +308,7 @@ func (c *ListCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		fmt.Printf("DocID %d: %s\n", i, doc.ID())
+		fmt.Printf("DocID %d: %s\n", i, summarizeDoc(doc))
 		count++
 	}
 
@@ -322,4 +322,48 @@ func init() {
 	RegisterCommand(NewImportCommand())
 	RegisterCommand(NewDeleteDocCommand())
 	RegisterCommand(NewListCommand())
+}
+
+func summarizeDoc(doc *document.Document) string {
+	if doc == nil {
+		return "(empty)"
+	}
+
+	if field := doc.Get("message"); field != nil {
+		msg := strings.TrimSpace(field.StringValue())
+		if msg != "" {
+			return msg
+		}
+	}
+
+	if field := doc.Get("raw"); field != nil {
+		raw := strings.TrimSpace(field.StringValue())
+		if raw != "" {
+			return truncate(raw, 100)
+		}
+	}
+
+	if field := doc.Get("path"); field != nil {
+		path := strings.TrimSpace(field.StringValue())
+		if path != "" {
+			return path
+		}
+	}
+
+	if id := strings.TrimSpace(doc.ID()); id != "" {
+		return id
+	}
+
+	return "(no summary)"
+}
+
+func truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }
