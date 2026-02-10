@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 
+	"maure/pkg/highlight"
 	"maure/pkg/index"
 	"maure/pkg/query"
 )
@@ -47,6 +48,7 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 
 	// 创建内存索引
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
+	docIDMap := make(map[int64]int64)
 
 	// 加载现有文档
 	reader := ctx.Reader
@@ -55,9 +57,11 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		if _, err := ramIdx.Add(doc); err != nil {
+		ramDocID, err := ramIdx.Add(doc)
+		if err != nil {
 			continue
 		}
+		docIDMap[ramDocID] = i
 	}
 
 	// 解析查询
@@ -77,32 +81,69 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		ExitWithError(fmt.Errorf("搜索失败: %w", err))
 	}
 
+	terms := query.ExtractTerms(parsedQuery)
+	highlighter := highlight.NewHighlighter()
+	hits := make([]SearchHit, 0, len(results))
+	for _, r := range results {
+		sourceDocID := r.DocID
+		if mappedDocID, ok := docIDMap[r.DocID]; ok {
+			sourceDocID = mappedDocID
+		}
+
+		var highlights []HighlightRange
+		doc, err := reader.GetDocument(sourceDocID)
+		if err == nil {
+			highlights = buildHighlightsForDoc(doc, terms, highlighter)
+		}
+
+		hits = append(hits, SearchHit{
+			DocID:      sourceDocID,
+			Score:      r.Score,
+			Highlights: highlights,
+		})
+	}
+
 	// 输出结果
 	switch c.output {
 	case "json":
-		outputJSON(os.Stdout, results)
+		outputJSON(os.Stdout, hits)
 	default:
-		outputText(os.Stdout, results)
+		outputText(os.Stdout, hits)
 	}
 
 	return nil
 }
 
-func outputText(w *os.File, results []index.ScoreDoc) {
-	fmt.Fprintf(w, "找到 %d 个结果:\n\n", len(results))
+func outputText(w *os.File, hits []SearchHit) {
+	fmt.Fprintf(w, "找到 %d 个结果:\n\n", len(hits))
 
-	for i, r := range results {
-		fmt.Fprintf(w, "[%d] DocID=%d Score=%.4f\n", i+1, r.DocID, r.Score)
+	for i, hit := range hits {
+		fmt.Fprintf(w, "[%d] DocID=%d Score=%.4f\n", i+1, hit.DocID, hit.Score)
+		if len(hit.Highlights) > 0 {
+			hl := hit.Highlights[0]
+			fmt.Fprintf(w, "    Highlight field=%s range=[%d,%d) fragment=%q\n", hl.Field, hl.Start, hl.End, hl.Fragment)
+		}
 	}
 }
 
-func outputJSON(w *os.File, results []index.ScoreDoc) {
-	fmt.Fprintf(w, `{"total":%d,"results":[`, len(results))
-	for i, r := range results {
+func outputJSON(w *os.File, hits []SearchHit) {
+	fmt.Fprintf(w, `{"total":%d,"results":[`, len(hits))
+	for i, hit := range hits {
 		if i > 0 {
 			fmt.Fprintf(w, ",")
 		}
-		fmt.Fprintf(w, `{"doc_id":%d,"score":%.4f}`, r.DocID, r.Score)
+		fmt.Fprintf(w, `{"doc_id":%d,"score":%.4f`, hit.DocID, hit.Score)
+		if len(hit.Highlights) > 0 {
+			fmt.Fprintf(w, `,"highlights":[`)
+			for j, hl := range hit.Highlights {
+				if j > 0 {
+					fmt.Fprintf(w, ",")
+				}
+				fmt.Fprintf(w, `{"field":%q,"start":%d,"end":%d,"fragment":%q}`, hl.Field, hl.Start, hl.End, hl.Fragment)
+			}
+			fmt.Fprintf(w, `]`)
+		}
+		fmt.Fprintf(w, `}`)
 	}
 	fmt.Fprintf(w, "]}")
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"maure/pkg/document"
+	"maure/pkg/highlight"
 	"maure/pkg/index"
 	"maure/pkg/query"
 )
@@ -47,22 +48,27 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 	}
 
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
+	docIDMap := make(map[int64]int64)
 	reader := ctx.Reader
 	for i := int64(1); i <= reader.DocCount(); i++ {
 		doc, err := reader.GetDocument(i)
 		if err != nil {
 			continue
 		}
-		if _, err := ramIdx.Add(doc); err != nil {
+		ramDocID, err := ramIdx.Add(doc)
+		if err != nil {
 			continue
 		}
+		docIDMap[ramDocID] = i
 	}
 
 	server := &Server{
-		idx:    ramIdx,
-		ctx:    ctx,
-		parser: query.NewQueryParser(),
-		port:   c.port,
+		idx:         ramIdx,
+		ctx:         ctx,
+		parser:      query.NewQueryParser(),
+		highlighter: highlight.NewHighlighter(),
+		sourceDocID: docIDMap,
+		port:        c.port,
 	}
 
 	fmt.Printf("启动服务: http://localhost:%d\n", c.port)
@@ -81,10 +87,12 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 
 // Server HTTP 服务器。
 type Server struct {
-	idx    *index.RAMIndex
-	ctx    *IndexContext
-	parser *query.QueryParser
-	port   int
+	idx         *index.RAMIndex
+	ctx         *IndexContext
+	parser      *query.QueryParser
+	highlighter *highlight.Highlighter
+	sourceDocID map[int64]int64
+	port        int
 }
 
 // Start 启动服务器。
@@ -136,14 +144,25 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type Result struct {
-		DocID int64   `json:"doc_id"`
-		Score float32 `json:"score"`
-	}
+	terms := query.ExtractTerms(parsedQuery)
+	response := make([]SearchHit, 0, len(results))
+	for _, r := range results {
+		docID := r.DocID
+		if sourceDocID, ok := s.sourceDocID[r.DocID]; ok {
+			docID = sourceDocID
+		}
 
-	response := make([]Result, len(results))
-	for i, r := range results {
-		response[i] = Result{DocID: r.DocID, Score: r.Score}
+		var highlights []HighlightRange
+		doc, docErr := s.ctx.Reader.GetDocument(docID)
+		if docErr == nil {
+			highlights = buildHighlightsForDoc(doc, terms, s.highlighter)
+		}
+
+		response = append(response, SearchHit{
+			DocID:      docID,
+			Score:      r.Score,
+			Highlights: highlights,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
