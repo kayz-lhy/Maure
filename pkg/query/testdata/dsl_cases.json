@@ -1,0 +1,56 @@
+[
+  {
+    "name": "numeric_range_and_wildcard",
+    "query": "price:[100 TO 300] AND title:iph*",
+    "expect_doc_ids": [1],
+    "expect_error": false
+  },
+  {
+    "name": "time_range",
+    "query": "timestamp:[2026-02-10T09:00:00Z TO 2026-02-10T10:00:00Z]",
+    "expect_doc_ids": [1, 2],
+    "expect_error": false
+  },
+  {
+    "name": "wildcard_prefix",
+    "query": "title:iph*",
+    "expect_doc_ids": [1],
+    "expect_error": false
+  },
+  {
+    "name": "fuzzy_distance_1",
+    "query": "name:roam~1",
+    "expect_doc_ids": [1, 2, 3],
+    "expect_error": false
+  },
+  {
+    "name": "boolean_not_filter",
+    "query": "price:[100 TO 500] NOT title:iph*",
+    "expect_doc_ids": [2, 3],
+    "expect_error": false
+  },
+  {
+    "name": "scope_limit_sort_parse_only",
+    "query": "@v1 IN index(\"app\") price:[100 TO 300] LIMIT 0,20 SORT BY timestamp DESC",
+    "expect_doc_ids": [1, 3],
+    "expect_error": false
+  },
+  {
+    "name": "reject_leading_wildcard",
+    "query": "title:*phone",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_fuzzy_distance_2",
+    "query": "name:roam~2",
+    "expect_doc_ids": [],
+    "expect_error": true
+  },
+  {
+    "name": "reject_invalid_range",
+    "query": "price:[100 300]",
+    "expect_doc_ids": [],
+    "expect_error": true
+  }
+]
