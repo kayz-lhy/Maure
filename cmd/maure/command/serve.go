@@ -151,6 +151,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	agg := r.URL.Query().Get("agg")
 	group := r.URL.Query().Get("group")
+	includeDoc := parseIncludeDoc(r.URL.Query().Get("include_doc"))
+	fields, err := parseFieldsParam(r.URL.Query().Get("fields"))
+	if err != nil {
+		http.Error(w, "参数 fields 非法: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	needDocView := includeDoc || len(fields) > 0
 	from := defaultPageFrom
 	size := defaultPageSize
 
@@ -203,9 +210,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var highlights []HighlightRange
+		var docView *SearchDocView
 		doc, docErr := s.ctx.Reader.GetDocument(docID)
 		if docErr == nil {
 			highlights = buildHighlightsForDoc(doc, terms, s.highlighter)
+			if needDocView {
+				docView = buildDocView(doc, includeDoc, fields)
+			}
 			docsForAgg = append(docsForAgg, doc)
 		}
 
@@ -213,6 +224,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			DocID:      docID,
 			Score:      r.Score,
 			Highlights: highlights,
+			Doc:        docView,
 		})
 	}
 

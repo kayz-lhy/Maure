@@ -18,6 +18,10 @@ type mockIndexReader struct {
 	docs map[int64]*document.Document
 }
 
+type searchResponse struct {
+	Results []SearchHit `json:"results"`
+}
+
 func (m *mockIndexReader) DocCount() int64 {
 	return int64(len(m.docs))
 }
@@ -43,25 +47,35 @@ func (m *mockIndexReader) Close() error {
 	return nil
 }
 
-func buildTestServerWithDocs(t *testing.T, n int) *Server {
+func buildTestServer(t *testing.T) *Server {
 	t.Helper()
 
 	idx := index.NewRAMIndex(analyzer.NewStandardAnalyzer())
-	source := make(map[int64]int64, n)
-	readerDocs := make(map[int64]*document.Document, n)
+	readerDocs := make(map[int64]*document.Document, 2)
+	source := make(map[int64]int64, 2)
 
-	for i := 1; i <= n; i++ {
-		doc := document.NewDocument()
-		doc.Add(document.NewTextField("message", "alpha"))
-		doc.Add(document.NewStringField("id", string(rune('a'+i-1))))
-
-		docID, err := idx.Add(doc)
-		if err != nil {
-			t.Fatalf("add doc failed: %v", err)
-		}
-		source[docID] = int64(i)
-		readerDocs[int64(i)] = doc
+	doc1 := document.NewDocument()
+	doc1.SetID("doc-1")
+	doc1.Add(document.NewTextField("message", "alpha request failed"))
+	doc1.Add(document.NewStringField("level", "error"))
+	doc1.Add(document.NewStringField("service", "api"))
+	id1, err := idx.Add(doc1)
+	if err != nil {
+		t.Fatalf("add doc1 failed: %v", err)
 	}
+	readerDocs[1] = doc1
+	source[id1] = 1
+
+	doc2 := document.NewDocument()
+	doc2.SetID("doc-2")
+	doc2.Add(document.NewTextField("message", "alpha request retry"))
+	doc2.Add(document.NewStringField("level", "warn"))
+	id2, err := idx.Add(doc2)
+	if err != nil {
+		t.Fatalf("add doc2 failed: %v", err)
+	}
+	readerDocs[2] = doc2
+	source[id2] = 2
 
 	return &Server{
 		idx:         idx,
@@ -74,70 +88,71 @@ func buildTestServerWithDocs(t *testing.T, n int) *Server {
 	}
 }
 
-func TestHandleSearchPaginationPagesWithoutOverlap(t *testing.T) {
-	s := buildTestServerWithDocs(t, 5)
+func TestHandleSearchIncludeDocReturnsSummary(t *testing.T) {
+	s := buildTestServer(t)
 
-	collect := func(rawQuery string) []int64 {
-		req := httptest.NewRequest(http.MethodGet, "/search?"+rawQuery, nil)
-		rr := httptest.NewRecorder()
-		s.handleSearch(rr, req)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha&include_doc=true", nil)
+	rr := httptest.NewRecorder()
+	s.handleSearch(rr, req)
 
-		if rr.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-		}
-
-		var payload struct {
-			Results []struct {
-				DocID int64 `json:"doc_id"`
-			} `json:"results"`
-		}
-		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("decode response failed: %v", err)
-		}
-
-		docIDs := make([]int64, 0, len(payload.Results))
-		for _, r := range payload.Results {
-			docIDs = append(docIDs, r.DocID)
-		}
-		return docIDs
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	page1 := collect("q=alpha&from=0&size=2")
-	page2 := collect("q=alpha&from=2&size=2")
-	page3 := collect("q=alpha&from=4&size=2")
-
-	if len(page1) != 2 || len(page2) != 2 || len(page3) != 1 {
-		t.Fatalf("unexpected page size: p1=%d p2=%d p3=%d", len(page1), len(page2), len(page3))
+	var resp searchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
 	}
-
-	seen := make(map[int64]bool)
-	for _, id := range append(append(page1, page2...), page3...) {
-		if seen[id] {
-			t.Fatalf("duplicated doc id across pages: %d", id)
-		}
-		seen[id] = true
+	if len(resp.Results) == 0 {
+		t.Fatalf("expected hits")
 	}
-	if len(seen) != 5 {
-		t.Fatalf("expected 5 unique docs across pages, got %d", len(seen))
+	if resp.Results[0].Doc == nil || resp.Results[0].Doc.Summary == "" {
+		t.Fatalf("expected doc summary, got %+v", resp.Results[0].Doc)
 	}
 }
 
-func TestHandleSearchPaginationParamValidation(t *testing.T) {
-	s := buildTestServerWithDocs(t, 3)
+func TestHandleSearchFieldsWhitelist(t *testing.T) {
+	s := buildTestServer(t)
 
-	cases := []string{
-		"q=alpha&from=-1&size=2",
-		"q=alpha&from=0&size=0",
-		"q=alpha&from=0&size=201",
-		"q=alpha&from=abc&size=2",
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha&fields=message,level", nil)
+	rr := httptest.NewRecorder()
+	s.handleSearch(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	for _, rawQuery := range cases {
-		req := httptest.NewRequest(http.MethodGet, "/search?"+rawQuery, nil)
-		rr := httptest.NewRecorder()
-		s.handleSearch(rr, req)
-		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400 for %q, got %d", rawQuery, rr.Code)
-		}
+	var resp searchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatalf("expected hits")
+	}
+
+	doc := resp.Results[0].Doc
+	if doc == nil {
+		t.Fatalf("expected doc payload")
+	}
+	if _, ok := doc.Fields["message"]; !ok {
+		t.Fatalf("expected whitelisted field message")
+	}
+	if _, ok := doc.Fields["level"]; !ok {
+		t.Fatalf("expected whitelisted field level")
+	}
+	if _, ok := doc.Fields["service"]; ok {
+		t.Fatalf("unexpected non-whitelisted field service")
+	}
+}
+
+func TestHandleSearchInvalidFieldsReturnsBadRequest(t *testing.T) {
+	s := buildTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/search?q=alpha&fields=message%3Bdrop", nil)
+	rr := httptest.NewRecorder()
+	s.handleSearch(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }

@@ -1,70 +1,48 @@
-# CLI / API 速查
-
-## CLI
-
-### 全局参数
-
-- `--index <path>` 索引目录
-- `--format <text|json>` CLI 输出格式
-- `--analyzer <standard|ram>` 分析器
-- `-v, --verbose` 详细输出
-
-### 常用命令
-
-```bash
-# 初始化
-maure init /tmp/maure/index
-
-# 导入日志
-maure --index /tmp/maure/index parse-log --log-format=auto /tmp/maure/app.log
-
-# 搜索 + 聚合
-maure --index /tmp/maure/index search --group=level "error OR timeout"
-
-# 查看统计
-maure --index /tmp/maure/index stats
-
-# 启动服务
-maure --index /tmp/maure/index serve --port 8080
-```
-
-### 兼容写法说明
-
-- `parse-log ... --format=json`：仍可用，但会提示弃用，建议改 `--log-format`。
-- `search "q" --group=level`：仍可用，但会提示弃用，建议将 flag 放在前面。
+# CLI / API 参考
 
 ## HTTP API
 
-### 查询
+### 搜索接口
 
-```bash
-curl "http://127.0.0.1:8080/search?q=error%20OR%20timeout&agg=count&group=level"
+```http
+GET /search?q=<query>&include_doc=true&fields=message,level
 ```
 
-### 文档详情
+参数：
 
-```bash
-curl "http://127.0.0.1:8080/doc/1"
+- `q`：查询语句（必填）
+- `include_doc`：可选，`true/1/yes` 时返回 `doc.summary`
+- `fields`：可选，逗号分隔字段白名单，示例 `fields=message,level,timestamp`
+
+行为：
+
+- 默认（不传 `include_doc` 且不传 `fields`）仅返回 `doc_id/score/highlights`
+- 传 `include_doc=true` 返回 `doc.summary`
+- 传 `fields` 返回 `doc.fields`（仅白名单字段）
+- 仅传 `fields` 也会返回 `doc`，用于替代前端逐条 `/doc` 请求
+
+返回示例：
+
+```json
+[
+  {
+    "doc_id": 1,
+    "score": 2.45,
+    "highlights": [
+      {
+        "field": "message",
+        "start": 0,
+        "end": 5,
+        "fragment": "error"
+      }
+    ],
+    "doc": {
+      "summary": "request failed",
+      "fields": {
+        "message": "request failed",
+        "level": "error"
+      }
+    }
+  }
+]
 ```
-
-### 统计
-
-```bash
-curl "http://127.0.0.1:8080/stats"
-```
-
-### 添加文档
-
-```bash
-curl -X POST "http://127.0.0.1:8080/add" \
-  -H "Content-Type: application/json" \
-  -d '{"id":"doc-1","fields":{"message":"request failed","level":"error"}}'
-```
-
-### 删除文档
-
-```bash
-curl -X DELETE "http://127.0.0.1:8080/delete?id=1"
-```
-
-说明：删除接口目前采用 query 参数，不是 RESTful 的 `DELETE /doc/:id`。

@@ -139,6 +139,11 @@ func (s *BM25Similarity) K1() float32 {
 	return s.k1
 }
 
+// B 返回 BM25 的长度归一化参数 b。
+func (s *BM25Similarity) B() float32 {
+	return s.b
+}
+
 // BM25L 是 BM25 的变体，使用不同的长度归一化。
 type BM25L struct {
 	k1 float32
