@@ -2,7 +2,9 @@ package query
 
 import (
 	"fmt"
+	"math"
 	"maure/pkg/index"
+	mauresearch "maure/pkg/search"
 	"maure/pkg/store"
 	"strings"
 )
@@ -38,6 +40,15 @@ func (q *TermQuery) WithBoost(boost float32) *TermQuery {
 
 // Search 实现了 Query 接口。
 func (q *TermQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
+	return q.searchInternal(idx, 0)
+}
+
+// SearchTopN 在收集阶段执行有界 Top-K，降低高频词查询开销。
+func (q *TermQuery) SearchTopN(idx *index.RAMIndex, n int) ([]index.ScoreDoc, error) {
+	return q.searchInternal(idx, n)
+}
+
+func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc, error) {
 	postings, err := idx.Inverted().GetPostings(q.Term)
 	if err != nil {
 		return nil, err
@@ -46,32 +57,72 @@ func (q *TermQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 	// 获取索引统计信息
 	numDocs := idx.Inverted().DocCount()
 	avgLength := idx.Inverted().AvgFieldLength()
+	docFreq := len(postings.DocIDs)
 	similarity := idx.Similarity()
+	results := make([]index.ScoreDoc, 0, docFreq)
+	useTopN := n > 0 && docFreq > n
+	var collector *queryTopKCollector
+	if useTopN {
+		collector = newQueryTopKCollector(n)
+	}
 
-	// 计算每个文档的评分
-	results := make([]index.ScoreDoc, 0, len(postings.DocIDs))
+	bm25, useBM25 := similarity.(*mauresearch.BM25Similarity)
+	_, useTFIDF := similarity.(*mauresearch.TFIDFSimilarity)
+	var bm25IDF, bm25K1, bm25B float32
+	var tfidfIDF float32
+	if useBM25 && docFreq > 0 && numDocs > 0 {
+		bm25IDF = float32(math.Log(float64(numDocs)/float64(docFreq)+1.0)) + 1.0
+		bm25K1 = bm25.K1()
+		bm25B = bm25.B()
+	}
+	if useTFIDF && docFreq > 0 && numDocs > 0 {
+		tfidfIDF = float32(math.Log(float64(numDocs)/float64(docFreq))) + 1.0
+	}
+
 	for i, docID := range postings.DocIDs {
 		termFreq := postings.Freqs[i]
 		docLength := idx.Inverted().FieldLength(docID)
 
-		// 使用评分算法计算
-		score := similarity.Score(
-			termFreq,
-			len(postings.DocIDs),
-			docLength,
-			avgLength,
-			numDocs,
-		) * q.Boost
+		var score float32
+		switch {
+		case useBM25:
+			if avgLength <= 0 {
+				avgLength = 1
+			}
+			lengthNorm := float64(bm25B)*float64(docLength)/avgLength + (1 - float64(bm25B))
+			bm25TF := (float32(termFreq) * (bm25K1 + 1)) / (float32(termFreq) + bm25K1*float32(lengthNorm))
+			score = bm25IDF * bm25TF * q.Boost
+		case useTFIDF:
+			score = float32(math.Sqrt(float64(termFreq))) * tfidfIDF * q.Boost
+		default:
+			score = similarity.Score(
+				termFreq,
+				docFreq,
+				docLength,
+				avgLength,
+				numDocs,
+			) * q.Boost
+		}
 
-		results = append(results, index.ScoreDoc{
+		candidate := index.ScoreDoc{
 			DocID: docID,
 			Score: score,
-		})
+		}
+		if useTopN {
+			collector.Add(candidate)
+			continue
+		}
+		results = append(results, candidate)
 	}
 
-	// 按评分降序排序
-	sortResults(results)
+	if useTopN {
+		return collector.Sorted(), nil
+	}
 
+	sortResults(results)
+	if n > 0 && len(results) > n {
+		results = results[:n]
+	}
 	return results, nil
 }
 
@@ -225,4 +276,83 @@ func (q *PhraseQuery) Explain(idx *index.RAMIndex) string {
 	}
 	result += ")"
 	return result
+}
+
+func queryBetterScoreDoc(a, b index.ScoreDoc) bool {
+	if a.Score == b.Score {
+		return a.DocID < b.DocID
+	}
+	return a.Score > b.Score
+}
+
+func queryWorseScoreDoc(a, b index.ScoreDoc) bool {
+	if a.Score == b.Score {
+		return a.DocID > b.DocID
+	}
+	return a.Score < b.Score
+}
+
+type queryTopKCollector struct {
+	n    int
+	data []index.ScoreDoc
+}
+
+func newQueryTopKCollector(n int) *queryTopKCollector {
+	return &queryTopKCollector{
+		n:    n,
+		data: make([]index.ScoreDoc, 0, n),
+	}
+}
+
+func (c *queryTopKCollector) Add(candidate index.ScoreDoc) {
+	if c.n <= 0 {
+		return
+	}
+	if len(c.data) < c.n {
+		c.data = append(c.data, candidate)
+		c.siftUp(len(c.data) - 1)
+		return
+	}
+	if queryBetterScoreDoc(candidate, c.data[0]) {
+		c.data[0] = candidate
+		c.siftDown(0)
+	}
+}
+
+func (c *queryTopKCollector) Sorted() []index.ScoreDoc {
+	out := make([]index.ScoreDoc, len(c.data))
+	copy(out, c.data)
+	sortResults(out)
+	return out
+}
+
+func (c *queryTopKCollector) siftUp(i int) {
+	for i > 0 {
+		p := (i - 1) / 2
+		if !queryWorseScoreDoc(c.data[i], c.data[p]) {
+			break
+		}
+		c.data[i], c.data[p] = c.data[p], c.data[i]
+		i = p
+	}
+}
+
+func (c *queryTopKCollector) siftDown(i int) {
+	n := len(c.data)
+	for {
+		l := i*2 + 1
+		r := l + 1
+		smallest := i
+		if l < n && queryWorseScoreDoc(c.data[l], c.data[smallest]) {
+			smallest = l
+		}
+		if r < n && queryWorseScoreDoc(c.data[r], c.data[smallest]) {
+			smallest = r
+		}
+		if smallest == i {
+			return
+		}
+		c.data[i], c.data[smallest] = c.data[smallest], c.data[i]
+		i = smallest
+	}
 }

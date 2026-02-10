@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"testing"
 
 	"maure/pkg/analyzer"
@@ -309,4 +310,94 @@ func BenchmarkRAMIndex_Search(b *testing.B) {
 		idx.Search(query, 10)
 	}
 	idx.Close()
+}
+
+func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
+	cases := []struct {
+		name     string
+		docCount int
+	}{
+		{name: "10k", docCount: 10000},
+		{name: "50k", docCount: 50000},
+	}
+
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+			defer idx.Close()
+
+			// 构造大规模数据集：
+			// - "error" 为高频词（每个文档都有）
+			// - "criticalspike" 为低频词（约 1% 文档）
+			// - "traceid%d" 为唯一词（每个文档一个）
+			for i := 0; i < c.docCount; i++ {
+				doc := document.NewDocument()
+				content := fmt.Sprintf(
+					"error request timeout service api traceid%d",
+					i,
+				)
+				if i%100 == 0 {
+					content += " criticalspike"
+				}
+				doc.Add(document.NewTextField("content", content))
+				if _, err := idx.Add(doc); err != nil {
+					b.Fatalf("add doc failed: %v", err)
+				}
+			}
+
+			hotQuery := NewTermQuery("error")
+			rareQuery := NewTermQuery("criticalspike")
+			uniqueQuery := NewTermQuery(fmt.Sprintf("traceid%d", c.docCount/2))
+
+			b.Run("hot-top10", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := idx.Search(hotQuery, 10); err != nil {
+						b.Fatalf("search failed: %v", err)
+					}
+				}
+			})
+
+			b.Run("hot-top100", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := idx.Search(hotQuery, 100); err != nil {
+						b.Fatalf("search failed: %v", err)
+					}
+				}
+			})
+
+			b.Run("hot-top1000", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := idx.Search(hotQuery, 1000); err != nil {
+						b.Fatalf("search failed: %v", err)
+					}
+				}
+			})
+
+			b.Run("rare-top10", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := idx.Search(rareQuery, 10); err != nil {
+						b.Fatalf("search failed: %v", err)
+					}
+				}
+			})
+
+			b.Run("unique-top10", func(b *testing.B) {
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := idx.Search(uniqueQuery, 10); err != nil {
+						b.Fatalf("search failed: %v", err)
+					}
+				}
+			})
+		})
+	}
 }

@@ -41,6 +41,8 @@ maure serve --port 8080
 ```bash
 # 搜索
 curl "http://localhost:8080/search?q=golang"
+curl "http://localhost:8080/search?q=error&include_doc=true"
+curl "http://localhost:8080/search?q=error&fields=message,level,timestamp"
 
 # 获取统计
 curl http://localhost:8080/stats
@@ -100,6 +102,8 @@ curl -X POST http://localhost:8080/add \
 |------|------|------|
 | GET | `/` | API 信息 |
 | GET | `/search?q=<query>` | 搜索文档 |
+| GET | `/search?q=<query>&include_doc=true` | 搜索并返回文档摘要 |
+| GET | `/search?q=<query>&fields=...` | 搜索并返回字段白名单 |
 | GET | `/doc/:id` | 获取文档 |
 | GET | `/stats` | 索引统计 |
 | POST | `/add` | 添加文档 |
@@ -122,6 +126,8 @@ curl -X POST http://localhost:8080/add \
 ## 文档
 
 - [开发指南](docs/DEVELOPMENT.md) - 快速上手
+- [CLI / API 参考](docs/CLI_API_REFERENCE.md) - 接口与参数速查
+- [Top-K 优化记录](docs/TOPK_OPTIMIZATION.md) - 查询性能优化策略与基准
 - [增量开发记录](docs/INCREMENT.md) - 开发历程
 - [架构设计](docs/ARCHITECTURE.md) - 设计思路
 - [需求规格](docs/REQUIREMENTS.md) - 功能列表

@@ -76,7 +76,7 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 	fmt.Printf("索引目录: %s\n", path)
 	fmt.Println("\nAPI 端点:")
 	fmt.Println("  GET  /            - API 信息")
-	fmt.Println("  GET  /search?q=   - 搜索文档")
+	fmt.Println("  GET  /search?q=   - 搜索文档（可选 include_doc/fields）")
 	fmt.Println("  GET  /doc/:id     - 获取文档")
 	fmt.Println("  GET  /stats       - 索引统计")
 	fmt.Println("  POST /add         - 添加文档")
@@ -115,7 +115,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"name":    "Maure Search Engine",
 		"version": Version,
 		"endpoints": map[string]string{
-			"search": "/search?q=<query>",
+			"search": "/search?q=<query>&include_doc=true&fields=message,level",
 			"doc":    "/doc/<id>",
 			"stats":  "/stats",
 			"add":    "POST /add",
@@ -130,6 +130,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	agg := r.URL.Query().Get("agg")
 	group := r.URL.Query().Get("group")
+	includeDoc := parseIncludeDoc(r.URL.Query().Get("include_doc"))
+	fields, err := parseFieldsParam(r.URL.Query().Get("fields"))
+	if err != nil {
+		http.Error(w, "fields 参数非法: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	needDocView := includeDoc || len(fields) > 0
 	if q == "" {
 		http.Error(w, "缺少查询参数 q", http.StatusBadRequest)
 		return
@@ -157,9 +164,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var highlights []HighlightRange
+		var docView *SearchDocView
 		doc, docErr := s.ctx.Reader.GetDocument(docID)
 		if docErr == nil {
 			highlights = buildHighlightsForDoc(doc, terms, s.highlighter)
+			if needDocView {
+				docView = buildDocView(doc, includeDoc, fields)
+			}
 			docsForAgg = append(docsForAgg, doc)
 		}
 
@@ -167,6 +178,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			DocID:      docID,
 			Score:      r.Score,
 			Highlights: highlights,
+			Doc:        docView,
 		})
 	}
 

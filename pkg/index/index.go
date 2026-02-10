@@ -6,6 +6,7 @@ package index
 
 import (
 	"errors"
+	"math"
 	"maure/pkg/analyzer"
 	"maure/pkg/document"
 	"maure/pkg/search"
@@ -141,7 +142,23 @@ func (idx *RAMIndex) Search(query Query, n int) ([]ScoreDoc, error) {
 		return nil, ErrClosed
 	}
 
-	return query.Search(idx)
+	if n <= 0 {
+		return []ScoreDoc{}, nil
+	}
+
+	// 可选快路径：查询对象支持 Top-K 有界收集时，直接使用。
+	if qTopN, ok := query.(interface {
+		SearchTopN(idx *RAMIndex, n int) ([]ScoreDoc, error)
+	}); ok {
+		return qTopN.SearchTopN(idx, n)
+	}
+
+	results, err := query.Search(idx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Sort(ScoreDocs(results))
+	return trimTopN(results, n), nil
 }
 
 // DocCount 实现了 Index 接口。
@@ -214,6 +231,9 @@ func (s ScoreDocs) Len() int {
 
 // Less 实现了 sort.Interface（按评分降序排序）。
 func (s ScoreDocs) Less(i, j int) bool {
+	if s[i].Score == s[j].Score {
+		return s[i].DocID < s[j].DocID
+	}
 	return s[i].Score > s[j].Score
 }
 
@@ -230,6 +250,96 @@ func (s ScoreDocs) TopN(n int) []ScoreDoc {
 	result := make([]ScoreDoc, n)
 	copy(result, s[:n])
 	return result
+}
+
+func trimTopN(results []ScoreDoc, n int) []ScoreDoc {
+	if n <= 0 {
+		return []ScoreDoc{}
+	}
+	if len(results) <= n {
+		return results
+	}
+	return results[:n]
+}
+
+func betterScoreDoc(a, b ScoreDoc) bool {
+	if a.Score == b.Score {
+		return a.DocID < b.DocID
+	}
+	return a.Score > b.Score
+}
+
+type topKCollector struct {
+	n    int
+	data []ScoreDoc // 最小堆，堆顶是当前最差结果
+}
+
+func newTopKCollector(n int) *topKCollector {
+	return &topKCollector{
+		n:    n,
+		data: make([]ScoreDoc, 0, n),
+	}
+}
+
+func (c *topKCollector) Add(candidate ScoreDoc) {
+	if c.n <= 0 {
+		return
+	}
+	if len(c.data) < c.n {
+		c.data = append(c.data, candidate)
+		c.siftUp(len(c.data) - 1)
+		return
+	}
+	// 仅当候选比当前最差更好时替换堆顶。
+	if betterScoreDoc(candidate, c.data[0]) {
+		c.data[0] = candidate
+		c.siftDown(0)
+	}
+}
+
+func (c *topKCollector) Sorted() []ScoreDoc {
+	out := make([]ScoreDoc, len(c.data))
+	copy(out, c.data)
+	sort.Sort(ScoreDocs(out))
+	return out
+}
+
+func (c *topKCollector) siftUp(i int) {
+	for i > 0 {
+		p := (i - 1) / 2
+		if !worseScoreDoc(c.data[i], c.data[p]) {
+			break
+		}
+		c.data[i], c.data[p] = c.data[p], c.data[i]
+		i = p
+	}
+}
+
+func (c *topKCollector) siftDown(i int) {
+	n := len(c.data)
+	for {
+		l := i*2 + 1
+		r := l + 1
+		smallest := i
+		if l < n && worseScoreDoc(c.data[l], c.data[smallest]) {
+			smallest = l
+		}
+		if r < n && worseScoreDoc(c.data[r], c.data[smallest]) {
+			smallest = r
+		}
+		if smallest == i {
+			return
+		}
+		c.data[i], c.data[smallest] = c.data[smallest], c.data[i]
+		i = smallest
+	}
+}
+
+func worseScoreDoc(a, b ScoreDoc) bool {
+	if a.Score == b.Score {
+		return a.DocID > b.DocID
+	}
+	return a.Score < b.Score
 }
 
 // Query 定义了查询的接口。
@@ -267,6 +377,15 @@ func (q *TermQuery) WithBoost(boost float32) *TermQuery {
 
 // Search 实现了 Query 接口。
 func (q *TermQuery) Search(idx *RAMIndex) ([]ScoreDoc, error) {
+	return q.searchInternal(idx, 0)
+}
+
+// SearchTopN 在收集阶段执行有界 Top-K，避免构建全量结果切片。
+func (q *TermQuery) SearchTopN(idx *RAMIndex, n int) ([]ScoreDoc, error) {
+	return q.searchInternal(idx, n)
+}
+
+func (q *TermQuery) searchInternal(idx *RAMIndex, n int) ([]ScoreDoc, error) {
 	postings, err := idx.inverted.GetPostings(q.Term)
 	if err != nil {
 		return nil, err
@@ -276,29 +395,68 @@ func (q *TermQuery) Search(idx *RAMIndex) ([]ScoreDoc, error) {
 	numDocs := idx.inverted.DocCount()
 	avgLength := idx.inverted.AvgFieldLength()
 
-	// 计算每个文档的评分
-	results := make([]ScoreDoc, 0, len(postings.DocIDs))
+	docFreq := len(postings.DocIDs)
+	results := make([]ScoreDoc, 0, docFreq)
+	useTopN := n > 0 && docFreq > n
+	var collector *topKCollector
+	if useTopN {
+		collector = newTopKCollector(n)
+	}
+
+	bm25, useBM25 := idx.similarity.(*search.BM25Similarity)
+	_, useTFIDF := idx.similarity.(*search.TFIDFSimilarity)
+	var bm25IDF, bm25K1, bm25B float32
+	var tfidfIDF float32
+	if useBM25 && docFreq > 0 && numDocs > 0 {
+		bm25IDF = float32(math.Log(float64(numDocs)/float64(docFreq)+1.0)) + 1.0
+		bm25K1 = bm25.K1()
+		bm25B = bm25.B()
+	}
+	if useTFIDF && docFreq > 0 && numDocs > 0 {
+		tfidfIDF = float32(math.Log(float64(numDocs)/float64(docFreq))) + 1.0
+	}
+
 	for i, docID := range postings.DocIDs {
 		termFreq := postings.Freqs[i]
 		docLength := idx.inverted.FieldLength(docID)
 
-		// 使用评分算法计算
-		score := idx.similarity.Score(
-			termFreq,
-			len(postings.DocIDs),
-			docLength,
-			avgLength,
-			numDocs,
-		) * q.Boost
+		var score float32
+		switch {
+		case useBM25:
+			if avgLength <= 0 {
+				avgLength = 1
+			}
+			lengthNorm := float64(bm25B)*float64(docLength)/avgLength + (1 - float64(bm25B))
+			bm25TF := (float32(termFreq) * (bm25K1 + 1)) / (float32(termFreq) + bm25K1*float32(lengthNorm))
+			score = bm25IDF * bm25TF * q.Boost
+		case useTFIDF:
+			score = float32(math.Sqrt(float64(termFreq))) * tfidfIDF * q.Boost
+		default:
+			score = idx.similarity.Score(
+				termFreq,
+				docFreq,
+				docLength,
+				avgLength,
+				numDocs,
+			) * q.Boost
+		}
 
-		results = append(results, ScoreDoc{
+		candidate := ScoreDoc{
 			DocID: docID,
 			Score: score,
-		})
+		}
+		if useTopN {
+			collector.Add(candidate)
+			continue
+		}
+		results = append(results, candidate)
 	}
 
-	// 按评分降序排序
-	sort.Sort(ScoreDocs(results))
+	if useTopN {
+		results = collector.Sorted()
+		return results, nil
+	}
 
-	return results, nil
+	sort.Sort(ScoreDocs(results))
+	return trimTopN(results, n), nil
 }
