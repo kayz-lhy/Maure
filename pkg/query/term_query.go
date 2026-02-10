@@ -59,8 +59,13 @@ func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc
 	avgLength := idx.Inverted().AvgFieldLength()
 	docFreq := len(postings.DocIDs)
 	similarity := idx.Similarity()
-	results := make([]index.ScoreDoc, 0, docFreq)
 	useTopN := n > 0 && docFreq > n
+	resultsCap := docFreq
+	if useTopN {
+		// TopN 路径不构建全量结果，避免高频词查询的超大预分配。
+		resultsCap = 0
+	}
+	results := make([]index.ScoreDoc, 0, resultsCap)
 	var collector *queryTopKCollector
 	if useTopN {
 		collector = newQueryTopKCollector(n)
@@ -320,10 +325,8 @@ func (c *queryTopKCollector) Add(candidate index.ScoreDoc) {
 }
 
 func (c *queryTopKCollector) Sorted() []index.ScoreDoc {
-	out := make([]index.ScoreDoc, len(c.data))
-	copy(out, c.data)
-	sortResults(out)
-	return out
+	sortResults(c.data)
+	return c.data
 }
 
 func (c *queryTopKCollector) siftUp(i int) {

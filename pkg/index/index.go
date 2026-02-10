@@ -298,10 +298,8 @@ func (c *topKCollector) Add(candidate ScoreDoc) {
 }
 
 func (c *topKCollector) Sorted() []ScoreDoc {
-	out := make([]ScoreDoc, len(c.data))
-	copy(out, c.data)
-	sort.Sort(ScoreDocs(out))
-	return out
+	sort.Sort(ScoreDocs(c.data))
+	return c.data
 }
 
 func (c *topKCollector) siftUp(i int) {
@@ -396,8 +394,13 @@ func (q *TermQuery) searchInternal(idx *RAMIndex, n int) ([]ScoreDoc, error) {
 	avgLength := idx.inverted.AvgFieldLength()
 
 	docFreq := len(postings.DocIDs)
-	results := make([]ScoreDoc, 0, docFreq)
 	useTopN := n > 0 && docFreq > n
+	resultsCap := docFreq
+	if useTopN {
+		// TopN 路径不构建全量结果，避免高频词查询的超大预分配。
+		resultsCap = 0
+	}
+	results := make([]ScoreDoc, 0, resultsCap)
 	var collector *topKCollector
 	if useTopN {
 		collector = newTopKCollector(n)
