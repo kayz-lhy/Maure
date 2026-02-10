@@ -1,143 +1,78 @@
-# Maure 架构设计
+# Maure 架构说明
 
-## 1. 整体架构
+## 1. 分层结构
 
-```
-┌─────────────────────────────────────────┐
-│              应用层 (CLI/API)             │
-├─────────────────────────────────────────┤
-│               搜索层                      │
-│         IndexSearcher / Query            │
-├─────────────────────────────────────────┤
-│               评分层                      │
-│            Similarity                    │
-├─────────────────────────────────────────┤
-│               索引层                      │
-│         InvertedIndex / IndexWriter      │
-├─────────────────────────────────────────┤
-│               分析层                      │
-│            Analyzer / Tokenizer          │
-├─────────────────────────────────────────┤
-│               文档层                      │
-│             Document / Field             │
-└─────────────────────────────────────────┘
+```text
+CLI / HTTP API
+    -> Query Parser / Command Layer
+        -> RAMIndex / InvertedIndex / Similarity
+            -> FSDirectory + Snapshot + WAL
+                -> 文件系统
 ```
 
-## 2. 包结构
+## 2. 关键目录
 
-```
+```text
+cmd/maure/
+  main.go                  # Cobra 入口
+  cobra/                   # Cobra 命令树与兼容桥接
+  command/                 # 业务命令实现（搜索、导入、服务等）
+
 pkg/
-├── analyzer/      # 分词器
-│   ├── analyzer.go
-│   ├── token.go
-│   └── standard.go
-├── document/      # 文档
-│   └── document.go
-├── index/         # 索引
-│   ├── index.go
-│   └── inverted.go
-├── query/         # 查询
-│   ├── query.go
-│   └── parser.go
-├── search/        # 评分
-│   └── similarity.go
-└── store/         # 存储
-    └── store.go
+  analyzer/                # 分词
+  document/                # 文档模型
+  index/                   # RAMIndex 与倒排索引
+  query/                   # 查询对象与解析器
+  search/                  # BM25/TF-IDF
+  aggregate/               # count/group 聚合
+  highlight/               # 高亮提取
+  logparser/               # JSON/Logback 解析
+  store/                   # FSDirectory、WAL、快照
 ```
 
-## 3. 核心数据结构
+## 3. 索引与持久化模型
 
-### Document
+### 3.1 RAM 索引
 
-```go
-type Document struct {
-    Fields []*Field
-    Boost  float32
-}
+- `InvertedIndex` 维护：
+  - `term -> Postings`
+  - `DocCount`
+  - `FieldLength`
+- 查询执行基于 RAM 结构完成评分与排序。
 
-type Field struct {
-    Name      string
-    Value     interface{}
-    FieldType FieldType   // Text, Numeric, Date, Stored
-    Stored    bool
-    Indexed   bool
-    Tokenized bool
-}
-```
+### 3.2 FS 持久化
 
-### InvertedIndex
+- 元数据：`manifest.json`
+- 快照：`snapshot_*.dat.gz`
+- 预写日志：`wal_*.log`
 
-```go
-type InvertedIndex struct {
-    terms   map[string]*Postings
-    nextDoc int64
-}
+写入路径：
 
-type Postings struct {
-    DocIDs    []int64
-    Freqs     []int
-    Positions [][]int
-}
-```
+1. 文档先落 WAL。
+2. `Commit` 时重建快照并写盘。
+3. 更新 manifest 并截断 WAL。
 
-## 4. 接口设计
+读取路径：
 
-### Index 接口
+1. 加载最新快照。
+2. 重放 WAL 中未提交操作。
+3. 必要时执行最小修复（例如旧快照缺少字段长度）。
 
-```go
-type Index interface {
-    Add(doc *document.Document) error
-    Delete(docID int64) error
-    Search(query string, n int) ([]ScoreDoc, error)
-    DocCount() int64
-    Close() error
-}
-```
+## 4. 查询执行路径
 
-### Analyzer 接口
+1. API/CLI 接收查询串。
+2. `query.QueryParser` 解析为查询树。
+3. 查询树在 `RAMIndex` 上执行（Term/Boolean/Phrase）。
+4. 输出命中文档评分。
+5. 可选执行聚合与高亮。
 
-```go
-type Analyzer interface {
-    Analyze(field string, text string) TokenStream
-}
+## 5. 当前架构权衡
 
-type Tokenizer interface {
-    Tokenize(field string, text string) TokenStream
-}
-```
+1. 优点：实现简单、可读性高、易调试。
+2. 代价：复杂布尔查询与大命中集下性能会下降。
+3. 已识别优化方向：见 `docs/reports/search-api-performance-analysis.md`。
 
-## 5. 评分算法
+## 6. 兼容策略
 
-### TF-IDF
-
-```
-score = tf * idf
-tf = sqrt(termFreq)
-idf = log(N / df)
-```
-
-### BM25
-
-```
-score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * fieldLength / avgLength))
-```
-
-## 6. 文件格式
-
-```
-index/
-├── segments    # 段元数据
-├── _0.tim      # 术语字典
-├── _0.tip      # 术语索引
-├── _0.doc      # 倒排表
-└── _0.pos      # 位置信息
-```
-
-## 7. 简单性原则
-
-本项目遵循以下简单性原则：
-
-1. **先实现后优化**
-2. **代码可读优先**
-3. **避免过度设计**
-4. **依赖最少原则**
+1. CLI 从原生 `flag` 迁移到 Cobra，保留历史写法兼容与弃用提示。
+2. FS 快照采用“读旧写新”策略，避免强制离线迁移。
