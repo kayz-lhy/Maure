@@ -1,7 +1,9 @@
 package query
 
 import (
+	"fmt"
 	"maure/pkg/index"
+	"strconv"
 	"strings"
 )
 
@@ -49,9 +51,18 @@ func (p *QueryParser) Parse(s string) (Query, error) {
 func (p *QueryParser) tokenize(s string) []string {
 	var tokens []string
 	var current strings.Builder
+	inRange := false
 
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+
+		if inRange {
+			current.WriteByte(c)
+			if c == ']' {
+				inRange = false
+			}
+			continue
+		}
 
 		switch c {
 		case ' ', '\t', '\n':
@@ -75,6 +86,11 @@ func (p *QueryParser) tokenize(s string) []string {
 				current.Reset()
 			}
 			tokens = append(tokens, string(c))
+		case '[':
+			current.WriteByte(c)
+			if strings.Contains(current.String(), ":") {
+				inRange = true
+			}
 		default:
 			current.WriteByte(c)
 		}
@@ -89,6 +105,9 @@ func (p *QueryParser) tokenize(s string) []string {
 
 // normalizeKeyword 将关键字转换为大写，普通词项转换为小写。
 func (p *QueryParser) normalizeKeyword(token string) string {
+	if strings.Contains(token, ":") {
+		return token
+	}
 	upper := strings.ToUpper(token)
 	if upper == "AND" || upper == "OR" || upper == "NOT" {
 		return upper
@@ -230,6 +249,17 @@ func (p *simpleParser) parsePrimary() (Query, error) {
 		return NewTermQuery(terms[0]), nil
 	}
 
+	// 字段表达式（范围/通配/模糊）
+	if strings.Contains(token, ":") {
+		query, ok, err := parseFieldExpression(token)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return query, nil
+		}
+	}
+
 	// 词项查询
 	return NewTermQuery(token), nil
 }
@@ -271,6 +301,86 @@ func (q *notQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 // Explain 实现了 Query 接口。
 func (q *notQuery) Explain(idx *index.RAMIndex) string {
 	return "NOT(...)"
+}
+
+func parseFieldExpression(token string) (Query, bool, error) {
+	parts := strings.SplitN(token, ":", 2)
+	if len(parts) != 2 {
+		return nil, false, nil
+	}
+
+	field := strings.TrimSpace(parts[0])
+	expr := strings.TrimSpace(parts[1])
+	if field == "" || expr == "" {
+		return nil, false, fmt.Errorf("invalid field expression: %s", token)
+	}
+
+	if strings.HasPrefix(expr, "[") || strings.HasSuffix(expr, "]") {
+		if !(strings.HasPrefix(expr, "[") && strings.HasSuffix(expr, "]")) {
+			return nil, false, fmt.Errorf("invalid range syntax: %s", token)
+		}
+		content := strings.TrimSpace(expr[1 : len(expr)-1])
+		upperContent := strings.ToUpper(content)
+		idx := strings.Index(upperContent, " TO ")
+		if idx < 0 {
+			return nil, false, fmt.Errorf("range query must contain TO: %s", token)
+		}
+
+		lower := strings.TrimSpace(content[:idx])
+		upper := strings.TrimSpace(content[idx+4:])
+		if lower == "" || upper == "" {
+			return nil, false, fmt.Errorf("invalid range bounds: %s", token)
+		}
+
+		kind, err := inferRangeKind(lower, upper)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid range query %s: %w", token, err)
+		}
+		return NewRangeQuery(field, lower, upper, kind, true), true, nil
+	}
+
+	if strings.Contains(expr, "?") {
+		return nil, false, fmt.Errorf("wildcard '?' is not supported: %s", token)
+	}
+	if strings.Contains(expr, "*") {
+		if !strings.HasSuffix(expr, "*") || strings.Count(expr, "*") != 1 {
+			return nil, false, fmt.Errorf("only suffix '*' wildcard is supported: %s", token)
+		}
+		prefix := strings.TrimSuffix(expr, "*")
+		if strings.TrimSpace(prefix) == "" {
+			return nil, false, fmt.Errorf("wildcard prefix cannot be empty: %s", token)
+		}
+		return NewWildcardQuery(field, prefix), true, nil
+	}
+
+	if strings.Contains(expr, "~") {
+		if !strings.HasSuffix(expr, "~1") {
+			return nil, false, fmt.Errorf("only fuzzy distance ~1 is supported: %s", token)
+		}
+		term := strings.TrimSuffix(expr, "~1")
+		if strings.TrimSpace(term) == "" {
+			return nil, false, fmt.Errorf("fuzzy term cannot be empty: %s", token)
+		}
+		return NewFuzzyQuery(field, term, 1), true, nil
+	}
+
+	return nil, false, nil
+}
+
+func inferRangeKind(lower string, upper string) (RangeValueKind, error) {
+	if _, err := strconv.ParseFloat(lower, 64); err == nil {
+		if _, err := strconv.ParseFloat(upper, 64); err == nil {
+			return RangeValueNumber, nil
+		}
+	}
+
+	if _, err := parseRangeTime(lower); err == nil {
+		if _, err := parseRangeTime(upper); err == nil {
+			return RangeValueTime, nil
+		}
+	}
+
+	return 0, fmt.Errorf("range supports only numeric/time bounds")
 }
 
 // MustQuery 是 MUST 查询的实现（类似于 BooleanQuery 中的 MUST）。

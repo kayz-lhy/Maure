@@ -280,6 +280,105 @@ func TestRAMIndex_FieldLengthUsesTokenCountOnly(t *testing.T) {
 	}
 }
 
+func TestRAMIndex_GetDocument(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("title", "hello world"))
+	doc.Add(document.NewInt64Field("price", 100))
+
+	docID, err := idx.Add(doc)
+	if err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	got, err := idx.GetDocument(docID)
+	if err != nil {
+		t.Fatalf("expected document, got error: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil document")
+	}
+	if got.Get("title") == nil || got.Get("title").StringValue() != "hello world" {
+		t.Fatalf("unexpected stored title")
+	}
+}
+
+func TestRAMIndex_GetDocumentAfterDelete(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("title", "to-delete"))
+	docID, err := idx.Add(doc)
+	if err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	if err := idx.Delete(docID); err != nil {
+		t.Fatalf("failed to delete doc: %v", err)
+	}
+
+	if _, err := idx.GetDocument(docID); err == nil {
+		t.Fatalf("expected ErrDocNotFound after delete")
+	}
+}
+
+func TestRAMIndex_DocumentSnapshotOnAdd(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("title", "before"))
+
+	docID, err := idx.Add(doc)
+	if err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	doc.Get("title").Value = "after"
+	doc.Add(document.NewTextField("extra", "new-field"))
+
+	got, err := idx.GetDocument(docID)
+	if err != nil {
+		t.Fatalf("expected document, got error: %v", err)
+	}
+	if got.Get("title") == nil || got.Get("title").StringValue() != "before" {
+		t.Fatalf("expected stored snapshot title to remain 'before'")
+	}
+	if got.Get("extra") != nil {
+		t.Fatalf("expected added field after Add not to appear in snapshot")
+	}
+}
+
+func TestRAMIndex_GetDocumentReturnsClone(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("title", "immutable"))
+
+	docID, err := idx.Add(doc)
+	if err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	first, err := idx.GetDocument(docID)
+	if err != nil {
+		t.Fatalf("expected document, got error: %v", err)
+	}
+	first.Get("title").Value = "mutated"
+
+	second, err := idx.GetDocument(docID)
+	if err != nil {
+		t.Fatalf("expected document, got error: %v", err)
+	}
+	if second.Get("title") == nil || second.Get("title").StringValue() != "immutable" {
+		t.Fatalf("expected GetDocument to return cloned document")
+	}
+}
+
 func BenchmarkRAMIndex_Add(b *testing.B) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	doc := document.NewDocument()

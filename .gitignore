@@ -51,3 +51,5 @@ Thumbs.db
 /snapshot_*.dat.gz
 /wal_*.log
 /maure
+
+.cache

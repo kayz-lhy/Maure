@@ -44,6 +44,10 @@ func ExtractTerms(q Query) []string {
 			}
 		case *notQuery:
 			walk(n.subQuery)
+		case *WildcardQuery:
+			appendUnique(&terms, seen, n.Prefix)
+		case *FuzzyQuery:
+			appendUnique(&terms, seen, n.Term)
 		}
 	}
 	walk(q)

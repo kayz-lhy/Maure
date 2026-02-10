@@ -32,6 +32,11 @@ maure add-dir ./docs
 # 搜索
 maure search "golang tutorial"
 
+# 高级查询（范围 / 通配 / 模糊）
+maure search "price:[100 TO 300] AND title:iph*"
+maure search "timestamp:[2026-02-10T09:00:00Z TO 2026-02-10T10:00:00Z]"
+maure search "name:roam~1"
+
 # 启动 HTTP 服务
 maure serve --port 8080
 ```
@@ -94,6 +99,18 @@ curl -X POST http://localhost:8080/add \
 | `--analyzer <a>` | 分析器类型 |
 | `-v` | 详细输出 |
 
+### 高级查询语法（v1 首版）
+
+- 范围查询（字段级，支持数值/时间）：`field:[lower TO upper]`
+- 通配符查询（字段级，仅后缀 `*`）：`field:prefix*`
+- 模糊查询（字段级，仅 `~1`）：`field:term~1`
+
+限制：
+
+- 不支持前导 `*`、不支持 `?` 通配。
+- 不支持 `~2` 及更高模糊距离。
+- 首版不支持字符串范围查询。
+
 ### HTTP API 端点
 
 | 方法 | 路径 | 说明 |
@@ -122,6 +139,7 @@ curl -X POST http://localhost:8080/add \
 ## 文档
 
 - [开发指南](docs/DEVELOPMENT.md) - 快速上手
+- [CLI / API 参考](docs/CLI_API_REFERENCE.md) - 命令与接口速查
 - [增量开发记录](docs/INCREMENT.md) - 开发历程
 - [架构设计](docs/ARCHITECTURE.md) - 设计思路
 - [需求规格](docs/REQUIREMENTS.md) - 功能列表
