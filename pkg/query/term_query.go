@@ -49,14 +49,15 @@ func (q *TermQuery) SearchTopN(idx *index.RAMIndex, n int) ([]index.ScoreDoc, er
 }
 
 func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc, error) {
-	postings, err := idx.Inverted().GetPostings(q.Term)
+	inv := idx.Inverted()
+	postings, err := inv.GetPostings(q.Term)
 	if err != nil {
 		return nil, err
 	}
 
 	// 获取索引统计信息
-	numDocs := idx.Inverted().DocCount()
-	avgLength := idx.Inverted().AvgFieldLength()
+	numDocs := inv.DocCount()
+	avgLength := inv.AvgFieldLength()
 	docFreq := len(postings.DocIDs)
 	similarity := idx.Similarity()
 	useTopN := n > 0 && docFreq > n
@@ -74,11 +75,19 @@ func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc
 	bm25, useBM25 := similarity.(*mauresearch.BM25Similarity)
 	_, useTFIDF := similarity.(*mauresearch.TFIDFSimilarity)
 	var bm25IDF, bm25K1, bm25B float32
+	var bm25TFNumerator, bm25BaseDenominator, bm25LenFactor float32
 	var tfidfIDF float32
 	if useBM25 && docFreq > 0 && numDocs > 0 {
 		bm25IDF = float32(math.Log(float64(numDocs)/float64(docFreq)+1.0)) + 1.0
 		bm25K1 = bm25.K1()
 		bm25B = bm25.B()
+		if avgLength <= 0 {
+			avgLength = 1
+		}
+		avgLen32 := float32(avgLength)
+		bm25TFNumerator = bm25K1 + 1
+		bm25BaseDenominator = bm25K1 * (1 - bm25B)
+		bm25LenFactor = bm25K1 * bm25B / avgLen32
 	}
 	if useTFIDF && docFreq > 0 && numDocs > 0 {
 		tfidfIDF = float32(math.Log(float64(numDocs)/float64(docFreq))) + 1.0
@@ -86,16 +95,26 @@ func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc
 
 	for i, docID := range postings.DocIDs {
 		termFreq := postings.Freqs[i]
-		docLength := idx.Inverted().FieldLength(docID)
+		if useTopN && useBM25 && collector.Full() {
+			tf := float32(termFreq)
+			// BM25 上界：假设最理想文档长度，若上界都进不了 Top-K，则跳过精确打分。
+			upperBM25TF := (tf * bm25TFNumerator) / (tf + bm25BaseDenominator)
+			upperBound := index.ScoreDoc{
+				DocID: docID,
+				Score: bm25IDF * upperBM25TF * q.Boost,
+			}
+			if !queryBetterScoreDoc(upperBound, collector.Worst()) {
+				continue
+			}
+		}
+
+		docLength := inv.FieldLength(docID)
 
 		var score float32
 		switch {
 		case useBM25:
-			if avgLength <= 0 {
-				avgLength = 1
-			}
-			lengthNorm := float64(bm25B)*float64(docLength)/avgLength + (1 - float64(bm25B))
-			bm25TF := (float32(termFreq) * (bm25K1 + 1)) / (float32(termFreq) + bm25K1*float32(lengthNorm))
+			tf := float32(termFreq)
+			bm25TF := (tf * bm25TFNumerator) / (tf + bm25BaseDenominator + bm25LenFactor*float32(docLength))
 			score = bm25IDF * bm25TF * q.Boost
 		case useTFIDF:
 			score = float32(math.Sqrt(float64(termFreq))) * tfidfIDF * q.Boost
@@ -327,6 +346,14 @@ func (c *queryTopKCollector) Add(candidate index.ScoreDoc) {
 func (c *queryTopKCollector) Sorted() []index.ScoreDoc {
 	sortResults(c.data)
 	return c.data
+}
+
+func (c *queryTopKCollector) Full() bool {
+	return c.n > 0 && len(c.data) >= c.n
+}
+
+func (c *queryTopKCollector) Worst() index.ScoreDoc {
+	return c.data[0]
 }
 
 func (c *queryTopKCollector) siftUp(i int) {

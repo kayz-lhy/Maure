@@ -2,11 +2,25 @@ package index
 
 import (
 	"fmt"
+	"runtime"
+	"runtime/debug"
 	"testing"
 
 	"maure/pkg/analyzer"
 	"maure/pkg/document"
 )
+
+func setupStableBench(b *testing.B) {
+	runtime.LockOSThread()
+	oldProcs := runtime.GOMAXPROCS(1)
+	oldGCPercent := debug.SetGCPercent(-1)
+	runtime.GC()
+	b.Cleanup(func() {
+		runtime.GOMAXPROCS(oldProcs)
+		debug.SetGCPercent(oldGCPercent)
+		runtime.UnlockOSThread()
+	})
+}
 
 func TestRAMIndex_Add(t *testing.T) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
@@ -294,6 +308,8 @@ func BenchmarkRAMIndex_Add(b *testing.B) {
 }
 
 func BenchmarkRAMIndex_Search(b *testing.B) {
+	setupStableBench(b)
+
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 
 	// 添加测试文档
@@ -304,6 +320,11 @@ func BenchmarkRAMIndex_Search(b *testing.B) {
 	}
 
 	query := NewTermQuery("test")
+
+	// 预热，降低首次执行抖动对统计的影响。
+	for i := 0; i < 200; i++ {
+		_, _ = idx.Search(query, 10)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -323,6 +344,8 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
+			setupStableBench(b)
+
 			idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 			defer idx.Close()
 
@@ -350,7 +373,11 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 			uniqueQuery := NewTermQuery(fmt.Sprintf("traceid%d", c.docCount/2))
 
 			b.Run("hot-top10", func(b *testing.B) {
+				setupStableBench(b)
 				b.ReportAllocs()
+				for i := 0; i < 200; i++ {
+					_, _ = idx.Search(hotQuery, 10)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if _, err := idx.Search(hotQuery, 10); err != nil {
@@ -360,7 +387,11 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 			})
 
 			b.Run("hot-top100", func(b *testing.B) {
+				setupStableBench(b)
 				b.ReportAllocs()
+				for i := 0; i < 200; i++ {
+					_, _ = idx.Search(hotQuery, 100)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if _, err := idx.Search(hotQuery, 100); err != nil {
@@ -370,7 +401,11 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 			})
 
 			b.Run("hot-top1000", func(b *testing.B) {
+				setupStableBench(b)
 				b.ReportAllocs()
+				for i := 0; i < 200; i++ {
+					_, _ = idx.Search(hotQuery, 1000)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if _, err := idx.Search(hotQuery, 1000); err != nil {
@@ -380,7 +415,11 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 			})
 
 			b.Run("rare-top10", func(b *testing.B) {
+				setupStableBench(b)
 				b.ReportAllocs()
+				for i := 0; i < 200; i++ {
+					_, _ = idx.Search(rareQuery, 10)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if _, err := idx.Search(rareQuery, 10); err != nil {
@@ -390,7 +429,11 @@ func BenchmarkRAMIndex_SearchLargeDataset(b *testing.B) {
 			})
 
 			b.Run("unique-top10", func(b *testing.B) {
+				setupStableBench(b)
 				b.ReportAllocs()
+				for i := 0; i < 200; i++ {
+					_, _ = idx.Search(uniqueQuery, 10)
+				}
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
 					if _, err := idx.Search(uniqueQuery, 10); err != nil {
