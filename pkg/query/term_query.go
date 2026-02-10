@@ -11,9 +11,9 @@ import (
 //
 // TermQuery 是最基本的查询类型，用于精确匹配词项。
 type TermQuery struct {
-	Term     string
-	Field    string
-	Boost    float32
+	Term  string
+	Field string
+	Boost float32
 }
 
 // NewTermQuery 创建新的 TermQuery。
@@ -83,7 +83,7 @@ func (q *TermQuery) Explain(idx *index.RAMIndex) string {
 // PhraseQuery 是短语查询的实现。
 type PhraseQuery struct {
 	terms []string
-	slop  int  // 词项之间的最大距离
+	slop  int // 词项之间的最大距离
 	boost float32
 }
 

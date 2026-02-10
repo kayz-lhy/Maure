@@ -56,6 +56,30 @@ func TestTermQuery_Search(t *testing.T) {
 	}
 }
 
+func TestTermQuery_Search_NoDuplicateDocIDs(t *testing.T) {
+	idx := index.NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("content", "go go go"))
+	if _, err := idx.Add(doc); err != nil {
+		t.Fatalf("failed to add doc: %v", err)
+	}
+
+	query := NewTermQuery("go")
+	results, err := query.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 deduplicated result, got %d", len(results))
+	}
+	if results[0].DocID != 1 {
+		t.Fatalf("expected docID 1, got %d", results[0].DocID)
+	}
+}
+
 func TestDisjunctionQuery_OR(t *testing.T) {
 	idx := createTestIndex(t)
 	defer idx.Close()

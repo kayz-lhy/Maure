@@ -60,7 +60,7 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 
 	server := &Server{
 		idx:    ramIdx,
-		ctx:   ctx,
+		ctx:    ctx,
 		parser: query.NewQueryParser(),
 		port:   c.port,
 	}
@@ -175,8 +175,8 @@ func (s *Server) handleDoc(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"doc_count":  s.idx.DocCount(),
-		"num_terms":  s.idx.Inverted().NumTerms(),
+		"doc_count": s.idx.DocCount(),
+		"num_terms": s.idx.Inverted().NumTerms(),
 	}); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}

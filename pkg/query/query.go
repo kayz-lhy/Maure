@@ -64,9 +64,9 @@ type BooleanQuery struct {
 
 // BooleanClause 表示布尔查询中的一个子句。
 type BooleanClause struct {
-	query  Query           // 子查询
-	occur  Occur          // 发生条件
-	boost  float32        // 权重
+	query Query   // 子查询
+	occur Occur   // 发生条件
+	boost float32 // 权重
 }
 
 // Occur 定义了子句的发生条件。
