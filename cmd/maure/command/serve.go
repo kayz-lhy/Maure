@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"maure/pkg/aggregate"
 	"maure/pkg/document"
 	"maure/pkg/highlight"
 	"maure/pkg/index"
@@ -127,6 +128,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
+	agg := r.URL.Query().Get("agg")
+	group := r.URL.Query().Get("group")
 	if q == "" {
 		http.Error(w, "缺少查询参数 q", http.StatusBadRequest)
 		return
@@ -146,6 +149,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	terms := query.ExtractTerms(parsedQuery)
 	response := make([]SearchHit, 0, len(results))
+	docsForAgg := make([]*document.Document, 0, len(results))
 	for _, r := range results {
 		docID := r.DocID
 		if sourceDocID, ok := s.sourceDocID[r.DocID]; ok {
@@ -156,6 +160,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		doc, docErr := s.ctx.Reader.GetDocument(docID)
 		if docErr == nil {
 			highlights = buildHighlightsForDoc(doc, terms, s.highlighter)
+			docsForAgg = append(docsForAgg, doc)
 		}
 
 		response = append(response, SearchHit{
@@ -165,7 +170,33 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	aggResult, err := aggregate.Build(docsForAgg, agg, group)
+	if err != nil {
+		http.Error(w, "聚合失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	showCount := agg != ""
+
 	w.Header().Set("Content-Type", "application/json")
+	if showCount || len(aggResult.Buckets) > 0 {
+		payload := map[string]interface{}{
+			"total":   len(response),
+			"results": response,
+		}
+		aggs := make(map[string]interface{})
+		if showCount {
+			aggs["count"] = aggResult.Count
+		}
+		if len(aggResult.Buckets) > 0 {
+			aggs["buckets"] = aggResult.Buckets
+		}
+		payload["aggregations"] = aggs
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			http.Error(w, "encode error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}
