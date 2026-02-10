@@ -1,6 +1,6 @@
-# ELK 场景前端示例
+# 日志检索前端示例
 
-这个页面演示如何通过 HTTP API 使用 Maure 进行日志检索任务：
+这个页面演示如何通过 HTTP API 使用 Maure 完成日志检索任务：
 
 - 错误检索（`error OR failed OR timeout`）
 - 分组聚合（`group=level` / `group=time(5m)`）
@@ -34,7 +34,7 @@ GOCACHE="/Users/kayz/Projects/Go/Maure/.cache/go-build" go run ./cmd/maure --ind
 在另一个终端执行：
 
 ```bash
-python3 -m http.server 5173 -d examples/frontend/elk-console
+python3 -m http.server 5173 -d examples/frontend/log-console
 ```
 
 浏览器打开：
