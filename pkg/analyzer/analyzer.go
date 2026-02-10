@@ -47,10 +47,10 @@ func (f TokenizerFunc) Tokenize(fieldName string, text string) TokenStream {
 //
 // 适用于英文和其他西方语言的通用分析器。
 type StandardAnalyzer struct {
-	tokenizer   Tokenizer
-	stopWords   map[string]struct{}
-	maxWordLen  int
-	lowerCase   bool
+	tokenizer  Tokenizer
+	stopWords  map[string]struct{}
+	maxWordLen int
+	lowerCase  bool
 }
 
 // NewStandardAnalyzer 创建默认的 StandardAnalyzer。

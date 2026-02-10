@@ -11,7 +11,7 @@ func TestTFIDFSimilarity_Score(t *testing.T) {
 	scorer := NewTFIDFSimilarity()
 
 	tests := []struct {
-		name      string
+		name     string
 		termFreq int
 		docFreq  int
 		docLen   int
@@ -20,40 +20,40 @@ func TestTFIDFSimilarity_Score(t *testing.T) {
 		want     float32
 	}{
 		{
-			name:      "basic term",
-			termFreq:  2,
-			docFreq:   10,
-			docLen:    100,
-			avgLen:    100,
-			numDocs:   1000,
-			want:      float32(math.Sqrt(2)) * (float32(math.Log(1000/10)) + 1),
+			name:     "basic term",
+			termFreq: 2,
+			docFreq:  10,
+			docLen:   100,
+			avgLen:   100,
+			numDocs:  1000,
+			want:     float32(math.Sqrt(2)) * (float32(math.Log(1000/10)) + 1),
 		},
 		{
-			name:      "rare term",
-			termFreq:  1,
-			docFreq:   1,
-			docLen:    50,
-			avgLen:    100,
-			numDocs:   1000,
-			want:      float32(math.Sqrt(1)) * (float32(math.Log(1000/1)) + 1),
+			name:     "rare term",
+			termFreq: 1,
+			docFreq:  1,
+			docLen:   50,
+			avgLen:   100,
+			numDocs:  1000,
+			want:     float32(math.Sqrt(1)) * (float32(math.Log(1000/1)) + 1),
 		},
 		{
-			name:      "zero freq",
-			termFreq:  0,
-			docFreq:   10,
-			docLen:    100,
-			avgLen:    100,
-			numDocs:   1000,
-			want:      0,
+			name:     "zero freq",
+			termFreq: 0,
+			docFreq:  10,
+			docLen:   100,
+			avgLen:   100,
+			numDocs:  1000,
+			want:     0,
 		},
 		{
-			name:      "zero docFreq",
-			termFreq:  2,
-			docFreq:   0,
-			docLen:    100,
-			avgLen:    100,
-			numDocs:   1000,
-			want:      0,
+			name:     "zero docFreq",
+			termFreq: 2,
+			docFreq:  0,
+			docLen:   100,
+			avgLen:   100,
+			numDocs:  1000,
+			want:     0,
 		},
 	}
 
@@ -72,7 +72,7 @@ func TestBM25Similarity_Score(t *testing.T) {
 	scorer := NewBM25Similarity()
 
 	tests := []struct {
-		name      string
+		name     string
 		termFreq int
 		docFreq  int
 		docLen   int
@@ -80,28 +80,28 @@ func TestBM25Similarity_Score(t *testing.T) {
 		numDocs  int64
 	}{
 		{
-			name:      "basic term",
-			termFreq:  2,
-			docFreq:   10,
-			docLen:    100,
-			avgLen:    100,
-			numDocs:   1000,
+			name:     "basic term",
+			termFreq: 2,
+			docFreq:  10,
+			docLen:   100,
+			avgLen:   100,
+			numDocs:  1000,
 		},
 		{
-			name:      "short doc",
-			termFreq:  3,
-			docFreq:   5,
-			docLen:    20,
-			avgLen:    100,
-			numDocs:   500,
+			name:     "short doc",
+			termFreq: 3,
+			docFreq:  5,
+			docLen:   20,
+			avgLen:   100,
+			numDocs:  500,
 		},
 		{
-			name:      "zero freq",
-			termFreq:  0,
-			docFreq:   10,
-			docLen:    100,
-			avgLen:    100,
-			numDocs:   1000,
+			name:     "zero freq",
+			termFreq: 0,
+			docFreq:  10,
+			docLen:   100,
+			avgLen:   100,
+			numDocs:  1000,
 		},
 	}
 
