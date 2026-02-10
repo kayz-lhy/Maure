@@ -99,14 +99,29 @@ type Server struct {
 // Start 启动服务器。
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/search", s.handleSearch)
-	mux.HandleFunc("/doc/", s.handleDoc)
-	mux.HandleFunc("/stats", s.handleStats)
-	mux.HandleFunc("/add", s.handleAdd)
-	mux.HandleFunc("/delete", s.handleDelete)
+	mux.HandleFunc("/", s.withCORS(s.handleIndex))
+	mux.HandleFunc("/search", s.withCORS(s.handleSearch))
+	mux.HandleFunc("/doc/", s.withCORS(s.handleDoc))
+	mux.HandleFunc("/stats", s.withCORS(s.handleStats))
+	mux.HandleFunc("/add", s.withCORS(s.handleAdd))
+	mux.HandleFunc("/delete", s.withCORS(s.handleDelete))
 
 	return http.ListenAndServe(":"+strconv.Itoa(s.port), mux)
+}
+
+func (s *Server) withCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

@@ -51,6 +51,11 @@ curl -X POST http://localhost:8080/add \
   -d '{"id":"doc1","fields":{"title":"Go语言","content":"Go是一门简洁的编程语言"}}'
 ```
 
+### 前端示例
+
+- ELK 日志任务台示例页面：`/Users/kayz/Projects/Go/Maure/examples/frontend/elk-console/index.html`
+- 使用说明：`/Users/kayz/Projects/Go/Maure/examples/frontend/elk-console/README.md`
+
 ## 功能
 
 ### 已支持

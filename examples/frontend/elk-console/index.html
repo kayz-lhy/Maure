@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Maure ELK 任务控制台</title>
+  <style>
+    :root {
+      --bg: #f4f8fb;
+      --panel: #ffffff;
+      --ink: #10243a;
+      --muted: #5b6d7d;
+      --accent: #0f766e;
+      --accent-soft: #d8f3ef;
+      --danger: #b91c1c;
+      --line: #d2dce6;
+      --shadow: 0 8px 24px rgba(16, 36, 58, 0.08);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 10%, #d9edf6 0, transparent 42%),
+        radial-gradient(circle at 90% 0%, #e8f7e8 0, transparent 36%),
+        var(--bg);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .hero {
+      background: linear-gradient(120deg, #0f766e, #155e75);
+      color: #ecfeff;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 1.45rem;
+      letter-spacing: .01em;
+    }
+
+    .hero p {
+      margin: 8px 0 0;
+      color: #c7ece8;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 1rem;
+    }
+
+    .label {
+      display: block;
+      font-size: .86rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: .95rem;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .stack { display: grid; gap: 12px; }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .14s ease, filter .14s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+
+    .primary { background: var(--accent); color: #fff; }
+    .secondary { background: var(--accent-soft); color: #0f4f4a; }
+    .ghost { background: #f2f6fa; color: #18354f; }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid #b8d5d2;
+      background: #eef9f7;
+      color: #0f4f4a;
+      font-size: .8rem;
+      cursor: pointer;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fbfdff;
+    }
+
+    .metric .k {
+      font-size: .75rem;
+      color: var(--muted);
+    }
+
+    .metric .v {
+      margin-top: 4px;
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+
+    .results {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .item {
+      border: 1px solid #ccdae8;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+    }
+
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: .82rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .line {
+      font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
+      background: #f4f7fa;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: .83rem;
+      overflow-x: auto;
+    }
+
+    .hl {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: #fff7cc;
+      border: 1px solid #f1d25b;
+      color: #5f4a00;
+      margin-top: 8px;
+      font-size: .78rem;
+    }
+
+    .bars { margin-top: 14px; display: grid; gap: 8px; }
+
+    .bar {
+      display: grid;
+      grid-template-columns: 120px 1fr 50px;
+      gap: 10px;
+      align-items: center;
+      font-size: .83rem;
+    }
+
+    .track {
+      height: 10px;
+      border-radius: 999px;
+      background: #e5edf4;
+      overflow: hidden;
+    }
+
+    .fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0f766e, #14b8a6);
+    }
+
+    .error {
+      margin-top: 8px;
+      color: var(--danger);
+      font-size: .85rem;
+      min-height: 1.2em;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .hero { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <div>
+        <h1>Maure 日志检索任务台</h1>
+        <p>模拟 ELK 一线排障：快速定位错误、观察分组聚合、查看文档明细。</p>
+      </div>
+      <div class="actions">
+        <button id="refreshStats" class="secondary">刷新索引统计</button>
+        <button id="runTask" class="primary">执行排障任务</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <aside class="panel stack">
+        <h2>查询配置</h2>
+
+        <label class="label" for="apiBase">API 地址</label>
+        <input id="apiBase" value="http://127.0.0.1:8080" />
+
+        <label class="label" for="queryInput">查询语句</label>
+        <input id="queryInput" value="error OR failed OR timeout OR exception" />
+
+        <label class="label" for="groupBy">分组</label>
+        <select id="groupBy">
+          <option value="">无分组</option>
+          <option value="level" selected>level</option>
+          <option value="time(5m)">time(5m)</option>
+        </select>
+
+        <div class="chips" id="templates"></div>
+
+        <div class="actions">
+          <button id="searchBtn" class="primary">搜索</button>
+          <button id="clearBtn" class="ghost">清空结果</button>
+        </div>
+
+        <div id="errorBox" class="error"></div>
+      </aside>
+
+      <section class="panel">
+        <h2>任务看板</h2>
+        <div class="metrics">
+          <div class="metric"><div class="k">索引文档数</div><div id="docCount" class="v">-</div></div>
+          <div class="metric"><div class="k">词项数</div><div id="termCount" class="v">-</div></div>
+          <div class="metric"><div class="k">当前命中数</div><div id="hitCount" class="v">-</div></div>
+        </div>
+
+        <div id="aggBars" class="bars"></div>
+        <div id="results" class="results"></div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const elements = {
+      apiBase: document.getElementById('apiBase'),
+      queryInput: document.getElementById('queryInput'),
+      groupBy: document.getElementById('groupBy'),
+      searchBtn: document.getElementById('searchBtn'),
+      clearBtn: document.getElementById('clearBtn'),
+      refreshStats: document.getElementById('refreshStats'),
+      runTask: document.getElementById('runTask'),
+      templates: document.getElementById('templates'),
+      errorBox: document.getElementById('errorBox'),
+      docCount: document.getElementById('docCount'),
+      termCount: document.getElementById('termCount'),
+      hitCount: document.getElementById('hitCount'),
+      aggBars: document.getElementById('aggBars'),
+      results: document.getElementById('results')
+    };
+
+    const presets = [
+      { label: '错误总览', query: 'error OR failed OR timeout OR exception', group: 'level' },
+      { label: '重试链路', query: 'retry OR retrying OR backoff', group: 'level' },
+      { label: '启动相关', query: 'started OR boot OR initialize', group: 'time(5m)' },
+      { label: '数据库异常', query: 'db OR mysql OR postgres OR timeout', group: 'level' }
+    ];
+
+    function setError(message = '') {
+      elements.errorBox.textContent = message;
+    }
+
+    function buildURL(path, params = {}) {
+      const base = elements.apiBase.value.trim().replace(/\/$/, '');
+      const url = new URL(base + path);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          url.searchParams.set(key, value);
+        }
+      });
+      return url.toString();
+    }
+
+    async function fetchJSON(url, init) {
+      const resp = await fetch(url, init);
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+      return resp.json();
+    }
+
+    function normalizeSearchPayload(payload) {
+      if (Array.isArray(payload)) {
+        return { total: payload.length, results: payload, aggregations: null };
+      }
+      return {
+        total: Number(payload.total ?? 0),
+        results: Array.isArray(payload.results) ? payload.results : [],
+        aggregations: payload.aggregations || null
+      };
+    }
+
+    function extractField(doc, name) {
+      const fields = Array.isArray(doc?.Fields) ? doc.Fields : [];
+      const hit = fields.find(f => f.Name === name);
+      if (!hit) return '';
+      if (hit.Value === null || hit.Value === undefined) return '';
+      return String(hit.Value);
+    }
+
+    function renderAgg(aggregations) {
+      const buckets = Array.isArray(aggregations?.buckets) ? aggregations.buckets : [];
+      elements.aggBars.innerHTML = '';
+      if (buckets.length === 0) return;
+
+      const max = Math.max(...buckets.map(b => Number(b.count || 0)), 1);
+      buckets.forEach((bucket) => {
+        const row = document.createElement('div');
+        row.className = 'bar';
+
+        const width = Math.round((Number(bucket.count || 0) / max) * 100);
+        row.innerHTML = `
+          <span>${bucket.key}</span>
+          <div class="track"><div class="fill" style="width:${width}%"></div></div>
+          <strong>${bucket.count}</strong>
+        `;
+        elements.aggBars.appendChild(row);
+      });
+    }
+
+    function renderResults(merged) {
+      elements.results.innerHTML = '';
+      if (merged.length === 0) {
+        elements.results.innerHTML = '<div class="item">无匹配结果</div>';
+        return;
+      }
+
+      merged.forEach(item => {
+        const node = document.createElement('article');
+        node.className = 'item';
+        const highlight = item.highlights?.[0]?.fragment || '';
+        const level = extractField(item.doc, 'level');
+        const message = extractField(item.doc, 'message');
+        const ts = extractField(item.doc, 'timestamp') || extractField(item.doc, 'time');
+        const source = extractField(item.doc, 'source');
+
+        node.innerHTML = `
+          <div class="meta">
+            <span>DocID ${item.doc_id} · Score ${Number(item.score || 0).toFixed(4)}</span>
+            <span>${level || 'unknown'} ${ts ? `· ${ts}` : ''}</span>
+          </div>
+          <div>${message || '(无 message 字段，见下方原始字段)'}</div>
+          ${highlight ? `<div class="hl">Highlight: ${highlight}</div>` : ''}
+          <div class="line">source=${source || '-'} | raw=${JSON.stringify(item.doc || {}, null, 0)}</div>
+        `;
+        elements.results.appendChild(node);
+      });
+    }
+
+    async function search() {
+      setError('');
+      const query = elements.queryInput.value.trim();
+      if (!query) {
+        setError('请输入查询语句');
+        return;
+      }
+
+      try {
+        const url = buildURL('/search', {
+          q: query,
+          agg: 'count',
+          group: elements.groupBy.value
+        });
+        const payload = normalizeSearchPayload(await fetchJSON(url));
+        elements.hitCount.textContent = payload.total;
+        renderAgg(payload.aggregations);
+
+        const detailPromises = payload.results.map(async (row) => {
+          try {
+            const doc = await fetchJSON(buildURL(`/doc/${row.doc_id}`));
+            return { ...row, doc };
+          } catch {
+            return { ...row, doc: null };
+          }
+        });
+
+        const merged = await Promise.all(detailPromises);
+        renderResults(merged);
+      } catch (err) {
+        setError(`搜索失败: ${err.message}`);
+      }
+    }
+
+    async function refreshStats() {
+      setError('');
+      try {
+        const data = await fetchJSON(buildURL('/stats'));
+        elements.docCount.textContent = data.doc_count ?? '-';
+        elements.termCount.textContent = data.num_terms ?? '-';
+      } catch (err) {
+        setError(`读取统计失败: ${err.message}`);
+      }
+    }
+
+    function initTemplates() {
+      presets.forEach((preset) => {
+        const btn = document.createElement('button');
+        btn.className = 'chip';
+        btn.textContent = preset.label;
+        btn.addEventListener('click', () => {
+          elements.queryInput.value = preset.query;
+          elements.groupBy.value = preset.group;
+          search();
+        });
+        elements.templates.appendChild(btn);
+      });
+    }
+
+    function clearPanel() {
+      elements.hitCount.textContent = '-';
+      elements.aggBars.innerHTML = '';
+      elements.results.innerHTML = '';
+      setError('');
+    }
+
+    elements.searchBtn.addEventListener('click', search);
+    elements.refreshStats.addEventListener('click', refreshStats);
+    elements.runTask.addEventListener('click', async () => {
+      elements.queryInput.value = 'error OR failed OR timeout OR exception';
+      elements.groupBy.value = 'level';
+      await refreshStats();
+      await search();
+    });
+    elements.clearBtn.addEventListener('click', clearPanel);
+
+    initTemplates();
+    refreshStats();
+    search();
+  </script>
+</body>
+</html>
