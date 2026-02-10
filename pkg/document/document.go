@@ -181,9 +181,9 @@ func inferType(v interface{}) FieldType {
 // 文档是搜索引擎存储和检索的基本单元。
 // 每个文档由多个字段组成，可以添加任意数量的字段。
 type Document struct {
-	Fields []*Field       // 字段列表
-	Boost  float32        // 文档权重（影响评分）
-	id     string         // 内部文档ID
+	Fields []*Field // 字段列表
+	Boost  float32  // 文档权重（影响评分）
+	id     string   // 内部文档ID
 }
 
 // NewDocument 创建一个新的空文档。

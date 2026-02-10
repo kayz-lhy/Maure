@@ -6,6 +6,9 @@ import (
 	"os"
 	"sort"
 
+	"maure/pkg/aggregate"
+	"maure/pkg/document"
+	"maure/pkg/highlight"
 	"maure/pkg/index"
 	"maure/pkg/query"
 )
@@ -15,6 +18,8 @@ type SearchCommand struct {
 	*BaseCommand
 	topN   int
 	output string
+	agg    string
+	group  string
 }
 
 // NewSearchCommand 创建搜索命令。
@@ -28,6 +33,8 @@ func NewSearchCommand() *SearchCommand {
 	cmd.flags = flag.NewFlagSet("search", flag.ContinueOnError)
 	cmd.flags.IntVar(&cmd.topN, "n", 10, "返回结果数量")
 	cmd.flags.StringVar(&cmd.output, "o", "text", "输出格式 (text/json)")
+	cmd.flags.StringVar(&cmd.agg, "agg", "", "聚合函数（支持: count）")
+	cmd.flags.StringVar(&cmd.group, "group", "", "分组方式（如: level 或 time(5m)）")
 	return cmd
 }
 
@@ -47,6 +54,7 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 
 	// 创建内存索引
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
+	docIDMap := make(map[int64]int64)
 
 	// 加载现有文档
 	reader := ctx.Reader
@@ -55,9 +63,11 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
-		if _, err := ramIdx.Add(doc); err != nil {
+		ramDocID, err := ramIdx.Add(doc)
+		if err != nil {
 			continue
 		}
+		docIDMap[ramDocID] = i
 	}
 
 	// 解析查询
@@ -77,34 +87,114 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		ExitWithError(fmt.Errorf("搜索失败: %w", err))
 	}
 
+	terms := query.ExtractTerms(parsedQuery)
+	highlighter := highlight.NewHighlighter()
+	hits := make([]SearchHit, 0, len(results))
+	docsForAgg := make([]*document.Document, 0, len(results))
+	for _, r := range results {
+		sourceDocID := r.DocID
+		if mappedDocID, ok := docIDMap[r.DocID]; ok {
+			sourceDocID = mappedDocID
+		}
+
+		var highlights []HighlightRange
+		doc, err := reader.GetDocument(sourceDocID)
+		if err == nil {
+			highlights = buildHighlightsForDoc(doc, terms, highlighter)
+			docsForAgg = append(docsForAgg, doc)
+		}
+
+		hits = append(hits, SearchHit{
+			DocID:      sourceDocID,
+			Score:      r.Score,
+			Highlights: highlights,
+		})
+	}
+
+	aggResult, err := aggregate.Build(docsForAgg, c.agg, c.group)
+	if err != nil {
+		ExitWithError(fmt.Errorf("聚合失败: %w", err))
+	}
+	showCount := c.agg != ""
+
 	// 输出结果
 	switch c.output {
 	case "json":
-		outputJSON(os.Stdout, results)
+		outputJSON(os.Stdout, hits, aggResult, showCount)
 	default:
-		outputText(os.Stdout, results)
+		outputText(os.Stdout, hits, aggResult, showCount)
 	}
 
 	return nil
 }
 
-func outputText(w *os.File, results []index.ScoreDoc) {
-	fmt.Fprintf(w, "找到 %d 个结果:\n\n", len(results))
+func outputText(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool) {
+	fmt.Fprintf(w, "找到 %d 个结果:\n\n", len(hits))
 
-	for i, r := range results {
-		fmt.Fprintf(w, "[%d] DocID=%d Score=%.4f\n", i+1, r.DocID, r.Score)
+	for i, hit := range hits {
+		fmt.Fprintf(w, "[%d] DocID=%d Score=%.4f\n", i+1, hit.DocID, hit.Score)
+		if len(hit.Highlights) > 0 {
+			hl := hit.Highlights[0]
+			fmt.Fprintf(w, "    Highlight field=%s range=[%d,%d) fragment=%q\n", hl.Field, hl.Start, hl.End, hl.Fragment)
+		}
+	}
+
+	if aggResult != nil {
+		if showCount {
+			fmt.Fprintf(w, "\nAgg count=%d\n", aggResult.Count)
+		}
+		if len(aggResult.Buckets) > 0 {
+			fmt.Fprintln(w, "\nAgg buckets:")
+			for _, b := range aggResult.Buckets {
+				fmt.Fprintf(w, "  %s: %d\n", b.Key, b.Count)
+			}
+		}
 	}
 }
 
-func outputJSON(w *os.File, results []index.ScoreDoc) {
-	fmt.Fprintf(w, `{"total":%d,"results":[`, len(results))
-	for i, r := range results {
+func outputJSON(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool) {
+	fmt.Fprintf(w, `{"total":%d,"results":[`, len(hits))
+	for i, hit := range hits {
 		if i > 0 {
 			fmt.Fprintf(w, ",")
 		}
-		fmt.Fprintf(w, `{"doc_id":%d,"score":%.4f}`, r.DocID, r.Score)
+		fmt.Fprintf(w, `{"doc_id":%d,"score":%.4f`, hit.DocID, hit.Score)
+		if len(hit.Highlights) > 0 {
+			fmt.Fprintf(w, `,"highlights":[`)
+			for j, hl := range hit.Highlights {
+				if j > 0 {
+					fmt.Fprintf(w, ",")
+				}
+				fmt.Fprintf(w, `{"field":%q,"start":%d,"end":%d,"fragment":%q}`, hl.Field, hl.Start, hl.End, hl.Fragment)
+			}
+			fmt.Fprintf(w, `]`)
+		}
+		fmt.Fprintf(w, `}`)
 	}
-	fmt.Fprintf(w, "]}")
+	fmt.Fprintf(w, "]")
+	if aggResult != nil && (showCount || len(aggResult.Buckets) > 0) {
+		fmt.Fprintf(w, `,"aggregations":{`)
+		wrote := false
+		if showCount {
+			fmt.Fprintf(w, `"count":%d`, aggResult.Count)
+			wrote = true
+		}
+		if len(aggResult.Buckets) > 0 {
+			if wrote {
+				fmt.Fprintf(w, ",")
+			}
+			fmt.Fprintf(w, `"buckets":[`)
+			for i, b := range aggResult.Buckets {
+				if i > 0 {
+					fmt.Fprintf(w, ",")
+				}
+				fmt.Fprintf(w, `{"key":%q,"count":%d}`, b.Key, b.Count)
+			}
+			fmt.Fprintf(w, "]")
+		}
+		fmt.Fprintf(w, "}")
+	}
+	fmt.Fprintf(w, "}")
 }
 
 // CountCommand 统计命令。

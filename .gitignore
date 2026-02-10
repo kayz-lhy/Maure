@@ -40,3 +40,14 @@ temp/
 
 # OS
 Thumbs.db
+
+# plan
+*.tfplan
+*.tfstate
+.zcf
+
+# Local runtime artifacts
+/manifest.json
+/snapshot_*.dat.gz
+/wal_*.log
+/maure

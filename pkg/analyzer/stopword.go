@@ -5,14 +5,14 @@ package analyzer
 // StopWordFilter 从词流中移除指定的停用词。
 // 停用词是语言中常见但对搜索意义不大的词（如 "the", "is", "at" 等）。
 type StopWordFilter struct {
-	source   TokenStream
+	source    TokenStream
 	stopWords map[string]struct{}
 }
 
 // NewStopWordFilter 创建新的 StopWordFilter。
 func NewStopWordFilter(source TokenStream, stopWords map[string]struct{}) *StopWordFilter {
 	return &StopWordFilter{
-		source:   source,
+		source:    source,
 		stopWords: stopWords,
 	}
 }

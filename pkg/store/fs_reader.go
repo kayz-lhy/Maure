@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"maure/pkg/analyzer"
 	"maure/pkg/document"
 )
 
@@ -16,6 +17,7 @@ var ErrDocNotFound = errors.New("document not found")
 type FsIndexReader struct {
 	dir      *FSDirectory   // 目录
 	snapshot *IndexSnapshot // 快照数据
+	analyzer analyzer.Analyzer
 }
 
 // NewFsIndexReader 创建新的 FsIndexReader。
@@ -29,12 +31,14 @@ func NewFsIndexReader(dir *FSDirectory) (*FsIndexReader, error) {
 	reader := &FsIndexReader{
 		dir:      dir,
 		snapshot: snapshot,
+		analyzer: analyzer.NewStandardAnalyzer(),
 	}
 
 	// 重放 WAL 中未提交的操作
 	if err := reader.replayWAL(); err != nil {
 		return nil, fmt.Errorf("replay wal: %w", err)
 	}
+	reader.repairSnapshotIfNeeded()
 
 	return reader, nil
 }
@@ -65,17 +69,29 @@ func (r *FsIndexReader) replayWAL() error {
 				return fmt.Errorf("decode doc: %w", err)
 			}
 
-			// 添加到快照
 			if _, exists := r.snapshot.Documents[op.DocID]; !exists {
 				r.snapshot.Documents[op.DocID] = &doc
 				if r.snapshot.LastDocID < op.DocID {
 					r.snapshot.LastDocID = op.DocID
 				}
+				r.applyDocTerms(op.DocID, &doc)
 			}
 
 		case WALOpDelete:
 			delete(r.snapshot.Documents, op.DocID)
 			delete(r.snapshot.FieldLength, op.DocID)
+			for term, postings := range r.snapshot.Terms {
+				for i := len(postings.DocIDs) - 1; i >= 0; i-- {
+					if postings.DocIDs[i] == op.DocID {
+						postings.DocIDs = append(postings.DocIDs[:i], postings.DocIDs[i+1:]...)
+						postings.Freqs = append(postings.Freqs[:i], postings.Freqs[i+1:]...)
+						postings.Positions = append(postings.Positions[:i], postings.Positions[i+1:]...)
+					}
+				}
+				if len(postings.DocIDs) == 0 {
+					delete(r.snapshot.Terms, term)
+				}
+			}
 		}
 	}
 
@@ -135,6 +151,70 @@ func (r *FsIndexReader) Close() error {
 // Snapshot 返回快照数据（只读）。
 func (r *FsIndexReader) Snapshot() *IndexSnapshot {
 	return r.snapshot
+}
+
+func (r *FsIndexReader) applyDocTerms(docID int64, doc *document.Document) {
+	termStats, docLength := AnalyzeDocument(doc, r.analyzer)
+	r.snapshot.FieldLength[docID] = docLength
+	for term, stat := range termStats {
+		postings, ok := r.snapshot.Terms[term]
+		if !ok {
+			postings = NewPostings()
+			r.snapshot.Terms[term] = postings
+		}
+		postings.DocIDs = append(postings.DocIDs, docID)
+		postings.Freqs = append(postings.Freqs, stat.Freq)
+		postings.Positions = append(postings.Positions, stat.Positions)
+	}
+}
+
+func (r *FsIndexReader) repairSnapshotIfNeeded() {
+	if r.snapshot.Documents == nil {
+		r.snapshot.Documents = make(map[int64]*document.Document)
+	}
+	if r.snapshot.Terms == nil {
+		r.snapshot.Terms = make(map[string]*Postings)
+	}
+	if r.snapshot.FieldLength == nil {
+		r.snapshot.FieldLength = make(map[int64]int)
+	}
+
+	needsLengthRebuild := len(r.snapshot.Documents) > 0 && len(r.snapshot.FieldLength) == 0
+	if !needsLengthRebuild {
+		for docID := range r.snapshot.Documents {
+			if _, ok := r.snapshot.FieldLength[docID]; !ok {
+				needsLengthRebuild = true
+				break
+			}
+		}
+	}
+	if needsLengthRebuild {
+		r.snapshot.FieldLength = make(map[int64]int, len(r.snapshot.Documents))
+		for docID, doc := range r.snapshot.Documents {
+			_, docLength := AnalyzeDocument(doc, r.analyzer)
+			r.snapshot.FieldLength[docID] = docLength
+		}
+	}
+
+	needsTermsRebuild := len(r.snapshot.Documents) > 0 && len(r.snapshot.Terms) == 0
+	if needsTermsRebuild {
+		r.snapshot.Terms = make(map[string]*Postings)
+		for docID, doc := range r.snapshot.Documents {
+			termStats, _ := AnalyzeDocument(doc, r.analyzer)
+			for term, stat := range termStats {
+				postings, ok := r.snapshot.Terms[term]
+				if !ok {
+					postings = NewPostings()
+					r.snapshot.Terms[term] = postings
+				}
+				postings.DocIDs = append(postings.DocIDs, docID)
+				postings.Freqs = append(postings.Freqs, stat.Freq)
+				postings.Positions = append(postings.Positions, stat.Positions)
+			}
+		}
+	}
+
+	r.snapshot.DocCount = int64(len(r.snapshot.Documents))
 }
 
 // ImportDocuments 导入文档数据（用于初始化倒排索引）。

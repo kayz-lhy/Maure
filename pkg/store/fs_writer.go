@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"maure/pkg/analyzer"
 	"maure/pkg/document"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // IndexSnapshot 是索引快照数据。
@@ -27,7 +27,8 @@ type FsIndexWriter struct {
 	dir        *FSDirectory   // 目录
 	snapshot   *IndexSnapshot // 内存快照
 	wal        *WAL           // WAL
-	pendingOps int            // 待提交操作数
+	analyzer   analyzer.Analyzer
+	pendingOps int // 待提交操作数
 }
 
 // NewFsIndexWriter 创建新的 FsIndexWriter。
@@ -48,6 +49,7 @@ func NewFsIndexWriter(dir *FSDirectory) (*FsIndexWriter, error) {
 		dir:        dir,
 		snapshot:   snapshot,
 		wal:        wal,
+		analyzer:   analyzer.NewStandardAnalyzer(),
 		pendingOps: 0,
 	}
 
@@ -80,42 +82,31 @@ func (w *FsIndexWriter) replayWAL() error {
 				return fmt.Errorf("decode doc: %w", err)
 			}
 
-			// 添加到快照
 			if _, exists := w.snapshot.Documents[op.DocID]; !exists {
-				w.snapshot.Documents[op.DocID] = &doc
-				if w.snapshot.LastDocID < op.DocID {
-					w.snapshot.LastDocID = op.DocID
-				}
+				w.applyAddToSnapshot(op.DocID, &doc)
 			}
-
-			// 更新倒排索引
-			w.updateInvertedIndex(op.DocID, &doc)
-
-			// 更新字段长度
-			length := w.calculateFieldLength(&doc)
-			w.snapshot.FieldLength[op.DocID] = length
-
 			w.pendingOps++
-			w.snapshot.DocCount++
 
 		case WALOpDelete:
-			delete(w.snapshot.Documents, op.DocID)
-			delete(w.snapshot.FieldLength, op.DocID)
-			// 从倒排表移除
-			for _, postings := range w.snapshot.Terms {
-				for i, id := range postings.DocIDs {
-					if id == op.DocID {
-						postings.DocIDs = append(postings.DocIDs[:i], postings.DocIDs[i+1:]...)
-						postings.Freqs = append(postings.Freqs[:i], postings.Freqs[i+1:]...)
-						postings.Positions = append(postings.Positions[:i], postings.Positions[i+1:]...)
-						break
+			if _, exists := w.snapshot.Documents[op.DocID]; exists {
+				delete(w.snapshot.Documents, op.DocID)
+				delete(w.snapshot.FieldLength, op.DocID)
+
+				// 从倒排表移除
+				for _, postings := range w.snapshot.Terms {
+					for i := len(postings.DocIDs) - 1; i >= 0; i-- {
+						if postings.DocIDs[i] == op.DocID {
+							postings.DocIDs = append(postings.DocIDs[:i], postings.DocIDs[i+1:]...)
+							postings.Freqs = append(postings.Freqs[:i], postings.Freqs[i+1:]...)
+							postings.Positions = append(postings.Positions[:i], postings.Positions[i+1:]...)
+						}
 					}
 				}
 			}
 			w.pendingOps++
-			w.snapshot.DocCount--
 		}
 	}
+	w.snapshot.DocCount = int64(len(w.snapshot.Documents))
 
 	return nil
 }
@@ -166,6 +157,16 @@ func (d *FSDirectory) loadSnapshot() (*IndexSnapshot, error) {
 	if err := codec.Decode(data, &snapshot); err != nil {
 		return nil, fmt.Errorf("decode snapshot: %w", err)
 	}
+	if snapshot.Documents == nil {
+		snapshot.Documents = make(map[int64]*document.Document)
+	}
+	if snapshot.Terms == nil {
+		snapshot.Terms = make(map[string]*Postings)
+	}
+	if snapshot.FieldLength == nil {
+		snapshot.FieldLength = make(map[int64]int)
+	}
+	snapshot.DocCount = int64(len(snapshot.Documents))
 
 	return &snapshot, nil
 }
@@ -174,16 +175,7 @@ func (d *FSDirectory) loadSnapshot() (*IndexSnapshot, error) {
 func (w *FsIndexWriter) AddDocument(doc *document.Document) (int64, error) {
 	docID := w.snapshot.LastDocID + 1
 
-	// 添加到内存快照
-	w.snapshot.Documents[docID] = doc
-	w.snapshot.LastDocID = docID
-
-	// 计算字段长度（用于评分）
-	length := w.calculateFieldLength(doc)
-	w.snapshot.FieldLength[docID] = length
-
-	// 更新倒排表
-	w.updateInvertedIndex(docID, doc)
+	w.applyAddToSnapshot(docID, doc)
 
 	// 编码文档数据
 	var buf bytes.Buffer
@@ -202,88 +194,38 @@ func (w *FsIndexWriter) AddDocument(doc *document.Document) (int64, error) {
 	return docID, nil
 }
 
-// calculateFieldLength 计算文档的字段总长度。
-func (w *FsIndexWriter) calculateFieldLength(doc *document.Document) int {
-	length := 0
-	for _, field := range doc.Fields {
-		if field.Indexed && field.Tokenized {
-			length += len(field.StringValue())
-		}
-	}
-	return length
-}
-
 // updateInvertedIndex 更新倒排索引。
 func (w *FsIndexWriter) updateInvertedIndex(docID int64, doc *document.Document) {
-	for _, field := range doc.Fields {
-		if !field.Indexed {
-			continue
+	termStats, _ := AnalyzeDocument(doc, w.analyzer)
+	for term, stat := range termStats {
+		postings, ok := w.snapshot.Terms[term]
+		if !ok {
+			postings = NewPostings()
+			w.snapshot.Terms[term] = postings
 		}
-
-		// 分词
-		tokens := w.tokenize(field)
-		for pos, term := range tokens {
-
-			postings, ok := w.snapshot.Terms[term]
-			if !ok {
-				postings = NewPostings()
-				w.snapshot.Terms[term] = postings
-			}
-
-			// 检查 docID 是否已存在（避免重复添加）
-			exists := false
-			for _, id := range postings.DocIDs {
-				if id == docID {
-					exists = true
-					break
-				}
-			}
-
-			if !exists {
-				postings.DocIDs = append(postings.DocIDs, docID)
-				postings.Freqs = append(postings.Freqs, 1)
-				postings.Positions = append(postings.Positions, []int{pos})
-			}
-		}
+		postings.DocIDs = append(postings.DocIDs, docID)
+		postings.Freqs = append(postings.Freqs, stat.Freq)
+		postings.Positions = append(postings.Positions, stat.Positions)
 	}
-}
-
-// tokenize 对字段进行分词。
-func (w *FsIndexWriter) tokenize(field *document.Field) []string {
-	// 简单分词：按空格分割并转小写
-	text := field.StringValue()
-	words := make([]string, 0)
-	word := ""
-	for _, c := range text {
-		if c == ' ' || c == ',' || c == '.' || c == '\t' || c == '\n' {
-			if len(word) > 0 {
-				words = append(words, strings.ToLower(word))
-				word = ""
-			}
-		} else {
-			word += string(c)
-		}
-	}
-	if len(word) > 0 {
-		words = append(words, strings.ToLower(word))
-	}
-	return words
 }
 
 // Delete 删除文档。
 func (w *FsIndexWriter) Delete(docID int64) error {
+	if _, exists := w.snapshot.Documents[docID]; !exists {
+		return nil
+	}
+
 	// 从内存快照移除
 	delete(w.snapshot.Documents, docID)
 	delete(w.snapshot.FieldLength, docID)
 
 	// 从倒排表移除
 	for _, postings := range w.snapshot.Terms {
-		for i, id := range postings.DocIDs {
-			if id == docID {
+		for i := len(postings.DocIDs) - 1; i >= 0; i-- {
+			if postings.DocIDs[i] == docID {
 				postings.DocIDs = append(postings.DocIDs[:i], postings.DocIDs[i+1:]...)
 				postings.Freqs = append(postings.Freqs[:i], postings.Freqs[i+1:]...)
 				postings.Positions = append(postings.Positions[:i], postings.Positions[i+1:]...)
-				break
 			}
 		}
 	}
@@ -311,6 +253,9 @@ func (w *FsIndexWriter) Commit() error {
 	if w.pendingOps == 0 {
 		return nil
 	}
+
+	// 在写入快照前重建倒排和长度，保证新旧数据口径一致。
+	w.rebuildSnapshotIndex()
 
 	// 同步 WAL
 	if err := w.wal.Sync(); err != nil {
@@ -355,6 +300,29 @@ func (w *FsIndexWriter) Commit() error {
 	w.pendingOps = 0
 
 	return nil
+}
+
+func (w *FsIndexWriter) applyAddToSnapshot(docID int64, doc *document.Document) {
+	w.snapshot.Documents[docID] = doc
+	if w.snapshot.LastDocID < docID {
+		w.snapshot.LastDocID = docID
+	}
+	_, docLength := AnalyzeDocument(doc, w.analyzer)
+	w.snapshot.FieldLength[docID] = docLength
+	w.updateInvertedIndex(docID, doc)
+	w.snapshot.DocCount = int64(len(w.snapshot.Documents))
+}
+
+func (w *FsIndexWriter) rebuildSnapshotIndex() {
+	w.snapshot.Terms = make(map[string]*Postings)
+	w.snapshot.FieldLength = make(map[int64]int)
+	w.snapshot.DocCount = int64(len(w.snapshot.Documents))
+
+	for docID, doc := range w.snapshot.Documents {
+		_, docLength := AnalyzeDocument(doc, w.analyzer)
+		w.snapshot.FieldLength[docID] = docLength
+		w.updateInvertedIndex(docID, doc)
+	}
 }
 
 // Close 关闭写入器。
