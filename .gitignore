@@ -37,6 +37,7 @@ go.work.sum
 tmp/
 temp/
 *.tmp
+.cache/
 
 # OS
 Thumbs.db

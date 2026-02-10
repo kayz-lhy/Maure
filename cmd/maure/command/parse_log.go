@@ -26,7 +26,7 @@ func NewParseLogCommand() *ParseLogCommand {
 	}
 	cmd.desc = "支持 JSON/Logback/auto 三种格式解析"
 	cmd.flags = flag.NewFlagSet("parse-log", flag.ContinueOnError)
-	cmd.flags.StringVar(&cmd.format, "format", logparser.FormatAuto, "日志格式: auto|json|logback")
+	cmd.flags.StringVar(&cmd.format, "log-format", logparser.FormatAuto, "日志格式: auto|json|logback")
 	return cmd
 }
 
