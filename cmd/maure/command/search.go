@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 
 	"maure/pkg/aggregate"
 	"maure/pkg/document"
@@ -16,10 +17,12 @@ import (
 // SearchCommand 搜索命令。
 type SearchCommand struct {
 	*BaseCommand
-	topN   int
-	output string
-	agg    string
-	group  string
+	size        int
+	from        int
+	output      string
+	agg         string
+	group       string
+	legacyNUsed bool
 }
 
 // NewSearchCommand 创建搜索命令。
@@ -28,10 +31,18 @@ func NewSearchCommand() *SearchCommand {
 		BaseCommand: NewBaseCommand("search", "maure search <query>", "搜索文档"),
 	}
 	cmd.desc = "搜索索引中的文档"
-	cmd.flags.IntVar(&cmd.topN, "n", 10, "返回结果数量")
-	cmd.flags.StringVar(&cmd.output, "o", "text", "输出格式 (text/json)")
 	cmd.flags = flag.NewFlagSet("search", flag.ContinueOnError)
-	cmd.flags.IntVar(&cmd.topN, "n", 10, "返回结果数量")
+	cmd.flags.IntVar(&cmd.from, "from", 0, "结果起始偏移（分页）")
+	cmd.flags.IntVar(&cmd.size, "size", 20, "返回结果数量（分页）")
+	cmd.flags.Func("n", "返回结果数量（已弃用，请使用 --size）", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return err
+		}
+		cmd.size = n
+		cmd.legacyNUsed = true
+		return nil
+	})
 	cmd.flags.StringVar(&cmd.output, "o", "text", "输出格式 (text/json)")
 	cmd.flags.StringVar(&cmd.agg, "agg", "", "聚合函数（支持: count）")
 	cmd.flags.StringVar(&cmd.group, "group", "", "分组方式（如: level 或 time(5m)）")
@@ -45,6 +56,18 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 	}
 
 	queryStr := args[0]
+	if c.from < 0 {
+		ExitWithError(fmt.Errorf("from 必须大于等于 0"))
+	}
+	if c.size <= 0 {
+		ExitWithError(fmt.Errorf("size 必须大于 0"))
+	}
+	if c.size > 200 {
+		ExitWithError(fmt.Errorf("size 超过上限 200"))
+	}
+	if c.legacyNUsed {
+		fmt.Fprintln(os.Stderr, "Warning: 参数 -n 已弃用，请改用 --size")
+	}
 
 	ctx, err := NewIndexContext(opts.IndexPath, opts)
 	if err != nil {
@@ -81,17 +104,18 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		return nil
 	}
 
-	// 执行搜索
-	results, err := ramIdx.Search(parsedQuery, c.topN)
+	topK := c.from + c.size
+	results, err := ramIdx.Search(parsedQuery, topK)
 	if err != nil {
 		ExitWithError(fmt.Errorf("搜索失败: %w", err))
 	}
+	pagedResults := paginateScoreDocs(results, c.from, c.size)
 
 	terms := query.ExtractTerms(parsedQuery)
 	highlighter := highlight.NewHighlighter()
-	hits := make([]SearchHit, 0, len(results))
-	docsForAgg := make([]*document.Document, 0, len(results))
-	for _, r := range results {
+	hits := make([]SearchHit, 0, len(pagedResults))
+	docsForAgg := make([]*document.Document, 0, len(pagedResults))
+	for _, r := range pagedResults {
 		sourceDocID := r.DocID
 		if mappedDocID, ok := docIDMap[r.DocID]; ok {
 			sourceDocID = mappedDocID
@@ -120,16 +144,17 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 	// 输出结果
 	switch c.output {
 	case "json":
-		outputJSON(os.Stdout, hits, aggResult, showCount)
+		outputJSON(os.Stdout, hits, aggResult, showCount, c.from, c.size)
 	default:
-		outputText(os.Stdout, hits, aggResult, showCount)
+		outputText(os.Stdout, hits, aggResult, showCount, c.from, c.size)
 	}
 
 	return nil
 }
 
-func outputText(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool) {
+func outputText(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool, from int, size int) {
 	fmt.Fprintf(w, "找到 %d 个结果:\n\n", len(hits))
+	fmt.Fprintf(w, "分页: from=%d size=%d page_count=%d\n\n", from, size, len(hits))
 
 	for i, hit := range hits {
 		fmt.Fprintf(w, "[%d] DocID=%d Score=%.4f\n", i+1, hit.DocID, hit.Score)
@@ -152,8 +177,8 @@ func outputText(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showC
 	}
 }
 
-func outputJSON(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool) {
-	fmt.Fprintf(w, `{"total":%d,"results":[`, len(hits))
+func outputJSON(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showCount bool, from int, size int) {
+	fmt.Fprintf(w, `{"total":%d,"from":%d,"size":%d,"page_count":%d,"results":[`, len(hits), from, size, len(hits))
 	for i, hit := range hits {
 		if i > 0 {
 			fmt.Fprintf(w, ",")
@@ -195,6 +220,17 @@ func outputJSON(w *os.File, hits []SearchHit, aggResult *aggregate.Result, showC
 		fmt.Fprintf(w, "}")
 	}
 	fmt.Fprintf(w, "}")
+}
+
+func paginateScoreDocs(results []index.ScoreDoc, from int, size int) []index.ScoreDoc {
+	if from >= len(results) {
+		return []index.ScoreDoc{}
+	}
+	end := from + size
+	if end > len(results) {
+		end = len(results)
+	}
+	return results[from:end]
 }
 
 // CountCommand 统计命令。
@@ -247,7 +283,7 @@ func (c *CountCommand) Execute(args []string, opts GlobalOptions) error {
 		return nil
 	}
 
-	results, err := ramIdx.Search(parsedQuery, 10000)
+	results, err := ramIdx.Search(parsedQuery, int(ramIdx.DocCount()))
 	if err != nil {
 		ExitWithError(fmt.Errorf("搜索失败: %w", err))
 	}

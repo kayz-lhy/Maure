@@ -259,6 +259,32 @@ func (d *Document) ID() string {
 	return d.id
 }
 
+// Clone 返回文档的副本，避免外部修改影响内部状态。
+func (d *Document) Clone() *Document {
+	if d == nil {
+		return nil
+	}
+
+	cloned := &Document{
+		Fields: make([]*Field, 0, len(d.Fields)),
+		Boost:  d.Boost,
+		id:     d.id,
+	}
+	for _, field := range d.Fields {
+		cloned.Fields = append(cloned.Fields, field.Clone())
+	}
+	return cloned
+}
+
+// Clone 返回字段的副本。
+func (f *Field) Clone() *Field {
+	if f == nil {
+		return nil
+	}
+	cloned := *f
+	return &cloned
+}
+
 // SetBoost 设置文档权重。
 func (d *Document) SetBoost(boost float32) {
 	d.Boost = boost

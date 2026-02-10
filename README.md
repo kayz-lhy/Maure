@@ -19,6 +19,15 @@ cd maure
 make install
 ```
 
+### 本地环境变量
+
+```bash
+cp .env.example .env
+```
+
+- `.env` 仅用于本地开发，不应提交到仓库。
+- 建议只在需要调用外部 API 或 `gh` 时配置令牌。
+
 ### CLI 基本使用
 
 ```bash
@@ -31,6 +40,7 @@ maure add-dir ./docs
 
 # 搜索
 maure search "golang tutorial"
+maure search --from 20 --size 20 "golang tutorial"
 
 # 启动 HTTP 服务
 maure serve --port 8080
@@ -41,6 +51,7 @@ maure serve --port 8080
 ```bash
 # 搜索
 curl "http://localhost:8080/search?q=golang"
+curl "http://localhost:8080/search?q=golang&from=0&size=20"
 
 # 获取统计
 curl http://localhost:8080/stats
@@ -85,6 +96,12 @@ curl -X POST http://localhost:8080/add \
 | `terms [prefix]` | 列出词项 |
 | `serve [--port]` | 启动 HTTP API 服务 |
 
+`search` 命令支持分页参数：
+
+- `--from` 起始偏移（默认 `0`）
+- `--size` 返回数量（默认 `20`，最大 `200`）
+- `-n` 仍可用，但已弃用，建议改用 `--size`
+
 ### 全局选项
 
 | 选项 | 说明 |
@@ -99,7 +116,7 @@ curl -X POST http://localhost:8080/add \
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | API 信息 |
-| GET | `/search?q=<query>` | 搜索文档 |
+| GET | `/search?q=<query>&from=<offset>&size=<limit>` | 搜索文档（分页） |
 | GET | `/doc/:id` | 获取文档 |
 | GET | `/stats` | 索引统计 |
 | POST | `/add` | 添加文档 |
@@ -122,6 +139,7 @@ curl -X POST http://localhost:8080/add \
 ## 文档
 
 - [开发指南](docs/DEVELOPMENT.md) - 快速上手
+- [CLI / API 参考](docs/CLI_API_REFERENCE.md) - 命令与接口速查
 - [增量开发记录](docs/INCREMENT.md) - 开发历程
 - [架构设计](docs/ARCHITECTURE.md) - 设计思路
 - [需求规格](docs/REQUIREMENTS.md) - 功能列表

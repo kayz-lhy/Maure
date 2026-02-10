@@ -47,7 +47,8 @@ type Index interface {
 // RAMIndex 是基于内存的索引实现。
 type RAMIndex struct {
 	mu         sync.RWMutex
-	inverted   *InvertedIndex    // 倒排索引
+	inverted   *InvertedIndex // 倒排索引
+	docStore   map[int64]*document.Document
 	analyzer   analyzer.Analyzer // 分析器
 	similarity search.Similarity // 评分算法
 	closed     bool
@@ -57,6 +58,7 @@ type RAMIndex struct {
 func NewRAMIndex(analyzerInstance analyzer.Analyzer) *RAMIndex {
 	return &RAMIndex{
 		inverted:   NewInvertedIndex(),
+		docStore:   make(map[int64]*document.Document),
 		analyzer:   analyzerInstance,
 		similarity: search.NewBM25Similarity(),
 	}
@@ -66,6 +68,7 @@ func NewRAMIndex(analyzerInstance analyzer.Analyzer) *RAMIndex {
 func NewRAMIndexWithConfig(opts ...RAMIndexOption) *RAMIndex {
 	idx := &RAMIndex{
 		inverted:   NewInvertedIndex(),
+		docStore:   make(map[int64]*document.Document),
 		analyzer:   analyzer.NewStandardAnalyzer(),
 		similarity: search.NewBM25Similarity(),
 	}
@@ -101,7 +104,12 @@ func (idx *RAMIndex) Add(doc *document.Document) (int64, error) {
 		return 0, ErrClosed
 	}
 
-	return idx.inverted.AddDocument(doc)
+	docID, err := idx.inverted.AddDocument(doc)
+	if err != nil {
+		return 0, err
+	}
+	idx.docStore[docID] = doc.Clone()
+	return docID, nil
 }
 
 // Delete 实现了 Index 接口。
@@ -113,7 +121,11 @@ func (idx *RAMIndex) Delete(docID int64) error {
 		return ErrClosed
 	}
 
-	return idx.inverted.Delete(docID)
+	if err := idx.inverted.Delete(docID); err != nil {
+		return err
+	}
+	delete(idx.docStore, docID)
+	return nil
 }
 
 // Update 实现了 Index 接口。
@@ -128,7 +140,13 @@ func (idx *RAMIndex) Update(docID int64, doc *document.Document) error {
 	if err := idx.inverted.Delete(docID); err != nil {
 		return err
 	}
-	_, err := idx.inverted.AddDocument(doc)
+	delete(idx.docStore, docID)
+
+	newDocID, err := idx.inverted.AddDocument(doc)
+	if err != nil {
+		return err
+	}
+	idx.docStore[newDocID] = doc.Clone()
 	return err
 }
 
@@ -141,7 +159,27 @@ func (idx *RAMIndex) Search(query Query, n int) ([]ScoreDoc, error) {
 		return nil, ErrClosed
 	}
 
-	return query.Search(idx)
+	if n <= 0 {
+		return []ScoreDoc{}, nil
+	}
+
+	results, err := query.Search(idx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 统一排序规则，避免分页时相同分数出现抖动。
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].DocID < results[j].DocID
+		}
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > n {
+		return results[:n], nil
+	}
+	return results, nil
 }
 
 // DocCount 实现了 Index 接口。
@@ -154,8 +192,14 @@ func (idx *RAMIndex) DocCount() int64 {
 
 // GetDocument 获取文档。
 func (idx *RAMIndex) GetDocument(docID int64) (*document.Document, error) {
-	// RAMIndex 目前不存储原始文档
-	return nil, ErrDocNotFound
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	doc, ok := idx.docStore[docID]
+	if !ok {
+		return nil, ErrDocNotFound
+	}
+	return doc.Clone(), nil
 }
 
 // Close 实现了 Index 接口。
@@ -167,6 +211,7 @@ func (idx *RAMIndex) Close() error {
 		return nil
 	}
 	idx.closed = true
+	idx.docStore = make(map[int64]*document.Document)
 	return nil
 }
 
@@ -198,6 +243,18 @@ func (idx *RAMIndex) SetSimilarity(s search.Similarity) {
 	idx.similarity = s
 }
 
+// DocumentIDs 返回当前索引中所有文档 ID 的快照。
+func (idx *RAMIndex) DocumentIDs() []int64 {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	ids := make([]int64, 0, len(idx.docStore))
+	for docID := range idx.docStore {
+		ids = append(ids, docID)
+	}
+	return ids
+}
+
 // ScoreDoc 表示搜索结果中的一个文档。
 type ScoreDoc struct {
 	DocID int64   // 文档 ID
@@ -214,6 +271,9 @@ func (s ScoreDocs) Len() int {
 
 // Less 实现了 sort.Interface（按评分降序排序）。
 func (s ScoreDocs) Less(i, j int) bool {
+	if s[i].Score == s[j].Score {
+		return s[i].DocID < s[j].DocID
+	}
 	return s[i].Score > s[j].Score
 }
 

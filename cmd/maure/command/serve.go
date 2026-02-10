@@ -15,6 +15,12 @@ import (
 	"maure/pkg/query"
 )
 
+const (
+	defaultPageFrom = 0
+	defaultPageSize = 20
+	maxPageSize     = 200
+)
+
 // ServeCommand HTTP 服务命令。
 type ServeCommand struct {
 	*BaseCommand
@@ -76,7 +82,7 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 	fmt.Printf("索引目录: %s\n", path)
 	fmt.Println("\nAPI 端点:")
 	fmt.Println("  GET  /            - API 信息")
-	fmt.Println("  GET  /search?q=   - 搜索文档")
+	fmt.Println("  GET  /search?q=&from=&size= - 搜索文档（分页）")
 	fmt.Println("  GET  /doc/:id     - 获取文档")
 	fmt.Println("  GET  /stats       - 索引统计")
 	fmt.Println("  POST /add         - 添加文档")
@@ -115,7 +121,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"name":    "Maure Search Engine",
 		"version": Version,
 		"endpoints": map[string]string{
-			"search": "/search?q=<query>",
+			"search": "/search?q=<query>&from=<offset>&size=<limit>",
 			"doc":    "/doc/<id>",
 			"stats":  "/stats",
 			"add":    "POST /add",
@@ -130,6 +136,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	agg := r.URL.Query().Get("agg")
 	group := r.URL.Query().Get("group")
+	from := defaultPageFrom
+	size := defaultPageSize
+
+	if fromParam := r.URL.Query().Get("from"); fromParam != "" {
+		parsedFrom, err := strconv.Atoi(fromParam)
+		if err != nil || parsedFrom < 0 {
+			http.Error(w, "参数 from 非法，必须为 >= 0 的整数", http.StatusBadRequest)
+			return
+		}
+		from = parsedFrom
+	}
+	if sizeParam := r.URL.Query().Get("size"); sizeParam != "" {
+		parsedSize, err := strconv.Atoi(sizeParam)
+		if err != nil || parsedSize <= 0 {
+			http.Error(w, "参数 size 非法，必须为 > 0 的整数", http.StatusBadRequest)
+			return
+		}
+		if parsedSize > maxPageSize {
+			http.Error(w, "参数 size 超过上限 200", http.StatusBadRequest)
+			return
+		}
+		size = parsedSize
+	}
 	if q == "" {
 		http.Error(w, "缺少查询参数 q", http.StatusBadRequest)
 		return
@@ -141,16 +170,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.idx.Search(parsedQuery, 20)
+	topK := from + size
+	results, err := s.idx.Search(parsedQuery, topK)
 	if err != nil {
 		http.Error(w, "搜索失败: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	pagedResults := paginateScoreDocs(results, from, size)
 
 	terms := query.ExtractTerms(parsedQuery)
-	response := make([]SearchHit, 0, len(results))
-	docsForAgg := make([]*document.Document, 0, len(results))
-	for _, r := range results {
+	response := make([]SearchHit, 0, len(pagedResults))
+	docsForAgg := make([]*document.Document, 0, len(pagedResults))
+	for _, r := range pagedResults {
 		docID := r.DocID
 		if sourceDocID, ok := s.sourceDocID[r.DocID]; ok {
 			docID = sourceDocID
@@ -180,8 +211,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if showCount || len(aggResult.Buckets) > 0 {
 		payload := map[string]interface{}{
-			"total":   len(response),
-			"results": response,
+			"total":          len(response),
+			"total_returned": len(response),
+			"from":           from,
+			"size":           size,
+			"results":        response,
 		}
 		aggs := make(map[string]interface{})
 		if showCount {
@@ -197,7 +231,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	payload := map[string]interface{}{
+		"total":          len(response),
+		"total_returned": len(response),
+		"from":           from,
+		"size":           size,
+		"results":        response,
+	}
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		http.Error(w, "encode error", http.StatusInternalServerError)
 	}
 }

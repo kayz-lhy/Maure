@@ -280,6 +280,70 @@ func TestRAMIndex_FieldLengthUsesTokenCountOnly(t *testing.T) {
 	}
 }
 
+func TestRAMIndex_SearchRespectsTopN(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	for i := 0; i < 5; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "same term"))
+		if _, err := idx.Add(doc); err != nil {
+			t.Fatalf("add doc failed: %v", err)
+		}
+	}
+
+	results, err := idx.Search(NewTermQuery("same"), 2)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected top 2 results, got %d", len(results))
+	}
+}
+
+func TestRAMIndex_SearchStableOrderOnTie(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	for i := 0; i < 4; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "alpha"))
+		if _, err := idx.Add(doc); err != nil {
+			t.Fatalf("add doc failed: %v", err)
+		}
+	}
+
+	results, err := idx.Search(NewTermQuery("alpha"), 4)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+
+	for i := 1; i < len(results); i++ {
+		if results[i-1].DocID > results[i].DocID {
+			t.Fatalf("expected docID ascending on tied scores, got %d before %d", results[i-1].DocID, results[i].DocID)
+		}
+	}
+}
+
+func TestRAMIndex_SearchWithNonPositiveNReturnsEmpty(t *testing.T) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+	defer idx.Close()
+
+	doc := document.NewDocument()
+	doc.Add(document.NewTextField("content", "alpha"))
+	if _, err := idx.Add(doc); err != nil {
+		t.Fatalf("add doc failed: %v", err)
+	}
+
+	results, err := idx.Search(NewTermQuery("alpha"), 0)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected empty results for n<=0, got %d", len(results))
+	}
+}
+
 func BenchmarkRAMIndex_Add(b *testing.B) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	doc := document.NewDocument()
@@ -308,5 +372,32 @@ func BenchmarkRAMIndex_Search(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		idx.Search(query, 10)
 	}
+	idx.Close()
+}
+
+func BenchmarkRAMIndex_SearchTopKComparison(b *testing.B) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+
+	for i := 0; i < 5000; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "alpha beta gamma"))
+		idx.Add(doc)
+	}
+	query := NewTermQuery("alpha")
+
+	b.Run("top-10", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			idx.Search(query, 10)
+		}
+	})
+
+	b.Run("top-1000", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			idx.Search(query, 1000)
+		}
+	})
+
 	idx.Close()
 }
