@@ -19,6 +19,15 @@ cd maure
 make install
 ```
 
+### 本地环境变量
+
+```bash
+cp .env.example .env
+```
+
+- `.env` 仅用于本地开发，不应提交到仓库。
+- 建议只在需要调用外部 API 或 `gh` 时配置令牌。
+
 ### CLI 基本使用
 
 ```bash
@@ -31,11 +40,7 @@ maure add-dir ./docs
 
 # 搜索
 maure search "golang tutorial"
-
-# 高级查询（范围 / 通配 / 模糊）
-maure search "price:[100 TO 300] AND title:iph*"
-maure search "timestamp:[2026-02-10T09:00:00Z TO 2026-02-10T10:00:00Z]"
-maure search "name:roam~1"
+maure search --from 20 --size 20 "golang tutorial"
 
 # 启动 HTTP 服务
 maure serve --port 8080
@@ -46,6 +51,7 @@ maure serve --port 8080
 ```bash
 # 搜索
 curl "http://localhost:8080/search?q=golang"
+curl "http://localhost:8080/search?q=golang&from=0&size=20"
 
 # 获取统计
 curl http://localhost:8080/stats
@@ -90,6 +96,12 @@ curl -X POST http://localhost:8080/add \
 | `terms [prefix]` | 列出词项 |
 | `serve [--port]` | 启动 HTTP API 服务 |
 
+`search` 命令支持分页参数：
+
+- `--from` 起始偏移（默认 `0`）
+- `--size` 返回数量（默认 `20`，最大 `200`）
+- `-n` 仍可用，但已弃用，建议改用 `--size`
+
 ### 全局选项
 
 | 选项 | 说明 |
@@ -99,24 +111,12 @@ curl -X POST http://localhost:8080/add \
 | `--analyzer <a>` | 分析器类型 |
 | `-v` | 详细输出 |
 
-### 高级查询语法（v1 首版）
-
-- 范围查询（字段级，支持数值/时间）：`field:[lower TO upper]`
-- 通配符查询（字段级，仅后缀 `*`）：`field:prefix*`
-- 模糊查询（字段级，仅 `~1`）：`field:term~1`
-
-限制：
-
-- 不支持前导 `*`、不支持 `?` 通配。
-- 不支持 `~2` 及更高模糊距离。
-- 首版不支持字符串范围查询。
-
 ### HTTP API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | API 信息 |
-| GET | `/search?q=<query>` | 搜索文档 |
+| GET | `/search?q=<query>&from=<offset>&size=<limit>` | 搜索文档（分页） |
 | GET | `/doc/:id` | 获取文档 |
 | GET | `/stats` | 索引统计 |
 | POST | `/add` | 添加文档 |

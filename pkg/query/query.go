@@ -260,6 +260,9 @@ func (q *BooleanQuery) Explain(idx *index.RAMIndex) string {
 // sortResults 按评分降序排序结果（使用快速排序）。
 func sortResults(results []index.ScoreDoc) {
 	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].DocID < results[j].DocID
+		}
 		return results[i].Score > results[j].Score
 	})
 }

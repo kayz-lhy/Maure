@@ -52,4 +52,7 @@ Thumbs.db
 /wal_*.log
 /maure
 
-.cache
+# Local env and tooling
+.env
+.cache/
+.codex/

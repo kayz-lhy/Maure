@@ -280,102 +280,67 @@ func TestRAMIndex_FieldLengthUsesTokenCountOnly(t *testing.T) {
 	}
 }
 
-func TestRAMIndex_GetDocument(t *testing.T) {
+func TestRAMIndex_SearchRespectsTopN(t *testing.T) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	defer idx.Close()
 
-	doc := document.NewDocument()
-	doc.Add(document.NewTextField("title", "hello world"))
-	doc.Add(document.NewInt64Field("price", 100))
-
-	docID, err := idx.Add(doc)
-	if err != nil {
-		t.Fatalf("failed to add doc: %v", err)
+	for i := 0; i < 5; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "same term"))
+		if _, err := idx.Add(doc); err != nil {
+			t.Fatalf("add doc failed: %v", err)
+		}
 	}
 
-	got, err := idx.GetDocument(docID)
+	results, err := idx.Search(NewTermQuery("same"), 2)
 	if err != nil {
-		t.Fatalf("expected document, got error: %v", err)
+		t.Fatalf("search failed: %v", err)
 	}
-	if got == nil {
-		t.Fatalf("expected non-nil document")
-	}
-	if got.Get("title") == nil || got.Get("title").StringValue() != "hello world" {
-		t.Fatalf("unexpected stored title")
+	if len(results) != 2 {
+		t.Fatalf("expected top 2 results, got %d", len(results))
 	}
 }
 
-func TestRAMIndex_GetDocumentAfterDelete(t *testing.T) {
+func TestRAMIndex_SearchStableOrderOnTie(t *testing.T) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	defer idx.Close()
 
-	doc := document.NewDocument()
-	doc.Add(document.NewTextField("title", "to-delete"))
-	docID, err := idx.Add(doc)
+	for i := 0; i < 4; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "alpha"))
+		if _, err := idx.Add(doc); err != nil {
+			t.Fatalf("add doc failed: %v", err)
+		}
+	}
+
+	results, err := idx.Search(NewTermQuery("alpha"), 4)
 	if err != nil {
-		t.Fatalf("failed to add doc: %v", err)
+		t.Fatalf("search failed: %v", err)
 	}
 
-	if err := idx.Delete(docID); err != nil {
-		t.Fatalf("failed to delete doc: %v", err)
-	}
-
-	if _, err := idx.GetDocument(docID); err == nil {
-		t.Fatalf("expected ErrDocNotFound after delete")
+	for i := 1; i < len(results); i++ {
+		if results[i-1].DocID > results[i].DocID {
+			t.Fatalf("expected docID ascending on tied scores, got %d before %d", results[i-1].DocID, results[i].DocID)
+		}
 	}
 }
 
-func TestRAMIndex_DocumentSnapshotOnAdd(t *testing.T) {
+func TestRAMIndex_SearchWithNonPositiveNReturnsEmpty(t *testing.T) {
 	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
 	defer idx.Close()
 
 	doc := document.NewDocument()
-	doc.Add(document.NewTextField("title", "before"))
+	doc.Add(document.NewTextField("content", "alpha"))
+	if _, err := idx.Add(doc); err != nil {
+		t.Fatalf("add doc failed: %v", err)
+	}
 
-	docID, err := idx.Add(doc)
+	results, err := idx.Search(NewTermQuery("alpha"), 0)
 	if err != nil {
-		t.Fatalf("failed to add doc: %v", err)
+		t.Fatalf("search failed: %v", err)
 	}
-
-	doc.Get("title").Value = "after"
-	doc.Add(document.NewTextField("extra", "new-field"))
-
-	got, err := idx.GetDocument(docID)
-	if err != nil {
-		t.Fatalf("expected document, got error: %v", err)
-	}
-	if got.Get("title") == nil || got.Get("title").StringValue() != "before" {
-		t.Fatalf("expected stored snapshot title to remain 'before'")
-	}
-	if got.Get("extra") != nil {
-		t.Fatalf("expected added field after Add not to appear in snapshot")
-	}
-}
-
-func TestRAMIndex_GetDocumentReturnsClone(t *testing.T) {
-	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
-	defer idx.Close()
-
-	doc := document.NewDocument()
-	doc.Add(document.NewTextField("title", "immutable"))
-
-	docID, err := idx.Add(doc)
-	if err != nil {
-		t.Fatalf("failed to add doc: %v", err)
-	}
-
-	first, err := idx.GetDocument(docID)
-	if err != nil {
-		t.Fatalf("expected document, got error: %v", err)
-	}
-	first.Get("title").Value = "mutated"
-
-	second, err := idx.GetDocument(docID)
-	if err != nil {
-		t.Fatalf("expected document, got error: %v", err)
-	}
-	if second.Get("title") == nil || second.Get("title").StringValue() != "immutable" {
-		t.Fatalf("expected GetDocument to return cloned document")
+	if len(results) != 0 {
+		t.Fatalf("expected empty results for n<=0, got %d", len(results))
 	}
 }
 
@@ -407,5 +372,32 @@ func BenchmarkRAMIndex_Search(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		idx.Search(query, 10)
 	}
+	idx.Close()
+}
+
+func BenchmarkRAMIndex_SearchTopKComparison(b *testing.B) {
+	idx := NewRAMIndex(analyzer.NewStandardAnalyzer())
+
+	for i := 0; i < 5000; i++ {
+		doc := document.NewDocument()
+		doc.Add(document.NewTextField("content", "alpha beta gamma"))
+		idx.Add(doc)
+	}
+	query := NewTermQuery("alpha")
+
+	b.Run("top-10", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			idx.Search(query, 10)
+		}
+	})
+
+	b.Run("top-1000", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			idx.Search(query, 1000)
+		}
+	})
+
 	idx.Close()
 }

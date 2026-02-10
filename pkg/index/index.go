@@ -159,7 +159,27 @@ func (idx *RAMIndex) Search(query Query, n int) ([]ScoreDoc, error) {
 		return nil, ErrClosed
 	}
 
-	return query.Search(idx)
+	if n <= 0 {
+		return []ScoreDoc{}, nil
+	}
+
+	results, err := query.Search(idx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 统一排序规则，避免分页时相同分数出现抖动。
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			return results[i].DocID < results[j].DocID
+		}
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > n {
+		return results[:n], nil
+	}
+	return results, nil
 }
 
 // DocCount 实现了 Index 接口。
@@ -251,6 +271,9 @@ func (s ScoreDocs) Len() int {
 
 // Less 实现了 sort.Interface（按评分降序排序）。
 func (s ScoreDocs) Less(i, j int) bool {
+	if s[i].Score == s[j].Score {
+		return s[i].DocID < s[j].DocID
+	}
 	return s[i].Score > s[j].Score
 }
 

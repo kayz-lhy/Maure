@@ -2,75 +2,45 @@
 
 ## CLI
 
-### 常用命令
+### 搜索
 
 ```bash
-# 初始化索引
-maure init /tmp/maure-demo/index
-
-# 导入日志
-maure --index /tmp/maure-demo/index parse-log /tmp/maure-demo/app.log --format=auto
-
-# 搜索
-maure --index /tmp/maure-demo/index search "error OR timeout"
+maure search [--from <offset>] [--size <limit>] "<query>"
 ```
 
-### 高级查询语法
+- `--from`：分页起始偏移，默认 `0`
+- `--size`：分页大小，默认 `20`，最大 `200`
+- `-n`：旧参数，等价于 `--size`（已弃用）
 
-#### 1) 范围查询（字段级）
-
-```bash
-maure search "price:[100 TO 300]"
-maure search "timestamp:[2026-02-10T09:00:00Z TO 2026-02-10T10:00:00Z]"
-```
-
-- 支持类型：数值、时间
-- 时间推荐 RFC3339
-
-#### 2) 通配符查询（字段级）
+示例：
 
 ```bash
-maure search "title:iph*"
-```
-
-- 仅支持后缀 `*`（prefix 查询）
-- 不支持前导 `*`
-- 不支持 `?`
-
-#### 3) 模糊查询（字段级）
-
-```bash
-maure search "name:roam~1"
-```
-
-- 仅支持 `~1`
-- 不支持 `~2` 及以上
-
-#### 4) 布尔组合
-
-```bash
-maure search "price:[100 TO 300] AND title:iph*"
-maure search "price:[100 TO 500] NOT title:iph*"
+maure search --from 0 --size 20 "golang"
+maure search --from 20 --size 20 "golang"
 ```
 
 ## HTTP API
 
-### 搜索
+### 搜索接口
 
-```bash
-curl "http://127.0.0.1:8080/search?q=price:[100 TO 300] AND title:iph*"
+```http
+GET /search?q=<query>&from=<offset>&size=<limit>
 ```
 
-说明：复杂查询建议 URL 编码。
+参数：
 
-### 统计
+- `q`：查询语句（必填）
+- `from`：分页起始偏移，默认 `0`
+- `size`：分页大小，默认 `20`，最大 `200`
 
-```bash
-curl "http://127.0.0.1:8080/stats"
-```
+返回示例：
 
-### 文档详情
-
-```bash
-curl "http://127.0.0.1:8080/doc/1"
+```json
+{
+  "total": 20,
+  "total_returned": 20,
+  "from": 0,
+  "size": 20,
+  "results": []
+}
 ```
