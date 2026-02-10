@@ -33,6 +33,7 @@ go test -race ./...
 ## 分支建议
 
 - 功能分支统一使用前缀：`codex/`
+- 默认从 `dev` 创建新功能分支（除非明确约定从其他基线切分）
 - 示例：`codex/cli-cobra-refactor`、`codex/frontend-log-demo`
 
 ## 开发流程
@@ -61,6 +62,6 @@ curl -X DELETE "http://127.0.0.1:8080/delete?id=1"
 
 ## 文档维护规则
 
-1. 命令参数、接口路径变更时必须同步更新 `README.md`。
+1. 命令参数、接口路径变更时必须同步更新 `README.md` 与 `docs/CLI_API_REFERENCE.md`。
 2. 若行为与历史不兼容，需标注兼容策略与弃用说明。
 3. 性能问题分析与优化计划统一放在 `docs/reports/`。

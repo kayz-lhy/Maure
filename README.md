@@ -1,6 +1,6 @@
 # Maure 搜索引擎
 
-一个轻量级的 Go 语言搜索引擎，适合学习、研究和小规模应用。
+一个轻量级、可嵌入部署的 Go 搜索引擎，支持日志检索与通用文本检索场景。
 
 ## 特点
 
@@ -14,7 +14,7 @@
 ### 安装
 
 ```bash
-git clone https://github.com/yourusername/maure.git
+git clone https://github.com/kayz-lhy/Maure.git
 cd maure
 make install
 ```
@@ -29,8 +29,8 @@ maure init ./myindex
 maure add ./docs/file.txt
 maure add-dir ./docs
 
-# 搜索
-maure search "golang tutorial"
+# 搜索（支持布尔/短语/范围/通配/模糊语法）
+maure search "level:error AND message:timeout"
 
 # 启动 HTTP 服务
 maure serve --port 8080
@@ -96,18 +96,28 @@ curl -X POST http://localhost:8080/add \
 | `--analyzer <a>` | 分析器类型 |
 | `-v` | 详细输出 |
 
-### HTTP API 端点
+### HTTP API 端点（当前实现）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | API 信息 |
-| GET | `/search?q=<query>` | 搜索文档 |
+| GET | `/search?q=<query>&from=<offset>&size=<limit>` | 搜索文档（分页） |
 | GET | `/search?q=<query>&include_doc=true` | 搜索并返回文档摘要 |
 | GET | `/search?q=<query>&fields=...` | 搜索并返回字段白名单 |
 | GET | `/doc/:id` | 获取文档 |
 | GET | `/stats` | 索引统计 |
 | POST | `/add` | 添加文档 |
-| DELETE | `/doc/:id` | 删除文档 |
+| DELETE | `/delete?id=<docID>` | 删除文档 |
+
+### 环境变量
+
+本地开发建议复制模板文件：
+
+```bash
+cp .env.example .env
+```
+
+默认不需要任何敏感配置；仅在使用 GitHub 自动化脚本时，可选配置 `GITHUB_PAT_TOKEN`。
 
 ## 已完成增量
 
@@ -126,11 +136,15 @@ curl -X POST http://localhost:8080/add \
 ## 文档
 
 - [开发指南](docs/DEVELOPMENT.md) - 快速上手
-- [CLI / API 参考](docs/CLI_API_REFERENCE.md) - 接口与参数速查
+- [CLI / API 参考](docs/CLI_API_REFERENCE.md) - 命令与接口速查
 - [Top-K 优化记录](docs/TOPK_OPTIMIZATION.md) - 查询性能优化策略与基准
 - [增量开发记录](docs/INCREMENT.md) - 开发历程
 - [架构设计](docs/ARCHITECTURE.md) - 设计思路
 - [需求规格](docs/REQUIREMENTS.md) - 功能列表
+- [测试策略](docs/TEST_STRATEGY.md) - 测试范围与质量门禁
+- [技术决策](docs/TECH_DECISIONS.md) - 关键方案与取舍
+- [AI Agent 指南](docs/AI_AGENT_GUIDE.md) - Agent 协作与任务约束
+- [性能分析报告](docs/reports/search-api-performance-analysis.md) - 搜索接口性能瓶颈与优化方向
 
 ## 演示测试
 
