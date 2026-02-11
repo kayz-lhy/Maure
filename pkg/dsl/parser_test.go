@@ -4,7 +4,7 @@ import "testing"
 
 func TestParse_VersionScopeLimitSort(t *testing.T) {
 	p := NewParser()
-	parsed, err := p.Parse(`@v1 IN index("app"),index("ops") level:error LIMIT 10,20 SORT BY timestamp DESC,level ASC`)
+	parsed, err := p.Parse(`@v1 REQUIRE_IN IN index("app"),index("ops") level:error LIMIT 10,20 SORT BY timestamp DESC,level ASC`)
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
@@ -13,6 +13,9 @@ func TestParse_VersionScopeLimitSort(t *testing.T) {
 	}
 	if len(parsed.Scopes) != 2 {
 		t.Fatalf("expected 2 scopes, got %d", len(parsed.Scopes))
+	}
+	if !parsed.RequireIn {
+		t.Fatalf("expected RequireIn=true")
 	}
 	if parsed.Limit == nil || parsed.Limit.From != 10 || parsed.Limit.Size != 20 {
 		t.Fatalf("unexpected limit: %+v", parsed.Limit)
@@ -51,8 +54,8 @@ func TestParse_RejectUnsupported(t *testing.T) {
 }
 
 func TestTokenize_ScopeAndSort(t *testing.T) {
-	got := tokenize(`@v1 IN index("app"),index("ops") level:error LIMIT 10,20 SORT BY ts DESC`)
-	want := []string{"@v1", "IN", `index("app")`, ",", `index("ops")`, "level:error", "LIMIT", "10", ",", "20", "SORT", "BY", "ts", "DESC"}
+	got := tokenize(`@v1 REQUIRE_IN IN index("app"),index("ops") level:error LIMIT 10,20 SORT BY ts DESC`)
+	want := []string{"@v1", "REQUIRE_IN", "IN", `index("app")`, ",", `index("ops")`, "level:error", "LIMIT", "10", ",", "20", "SORT", "BY", "ts", "DESC"}
 	if len(got) != len(want) {
 		t.Fatalf("token len mismatch\nwant=%v\ngot=%v", want, got)
 	}

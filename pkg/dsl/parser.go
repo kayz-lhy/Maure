@@ -2,33 +2,53 @@ package dsl
 
 import (
 	"fmt"
+	"maure/pkg/dsl/components"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Parser 负责将 DSL 文本解析为 AST。
-type Parser struct{}
+// Parser 负责将 DSL token 解析为 AST。
+type Parser struct {
+	registry *components.Registry
+}
 
 // NewParser 创建 DSL 解析器。
 func NewParser() *Parser {
-	return &Parser{}
+	return &Parser{registry: components.DefaultRegistry()}
 }
 
-// Parse 解析完整 DSL（版本/作用域/表达式/分页/排序）。
-func (p *Parser) Parse(s string) (*ParsedQuery, error) {
-	tokens := tokenize(strings.TrimSpace(s))
-	if len(tokens) == 0 {
+// Parse 兼容入口：直接解析字符串。
+func (p *Parser) Parse(input string) (*ParsedQuery, error) {
+	lexer := DefaultLexer{}
+	tokens, err := lexer.Tokenize(strings.TrimSpace(input))
+	if err != nil {
+		return nil, err
+	}
+	return p.ParseTokens(tokens)
+}
+
+// ParseTokens 实现 ParserDef 接口。
+func (p *Parser) ParseTokens(tokens []Token) (*AST, error) {
+	raw := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		raw = append(raw, t.Raw)
+	}
+	if len(raw) == 0 {
 		return &ParsedQuery{}, nil
 	}
 
-	ps := &state{tokens: tokens}
+	ps := &state{tokens: raw, registry: p.registry}
 	out := &ParsedQuery{Version: 1}
 
 	if v, ok, err := ps.parseVersion(); err != nil {
 		return nil, err
 	} else if ok {
 		out.Version = v
+	}
+	if ps.peekUpper() == "REQUIRE_IN" {
+		ps.consume()
+		out.RequireIn = true
 	}
 
 	scopes, err := ps.parseScope()
@@ -67,8 +87,9 @@ func (p *Parser) Parse(s string) (*ParsedQuery, error) {
 }
 
 type state struct {
-	tokens []string
-	pos    int
+	tokens   []string
+	pos      int
+	registry *components.Registry
 }
 
 func (s *state) parseVersion() (int, bool, error) {
@@ -214,22 +235,22 @@ func (s *state) parseAnd() (Expr, error) {
 
 	for s.hasMore() {
 		upper := s.peekUpper()
-		switch upper {
-		case "AND":
+		switch {
+		case upper == "AND":
 			s.consume()
 			right, err := s.parseNot()
 			if err != nil {
 				return nil, err
 			}
 			left = AndExpr{Left: left, Right: right}
-		case "NOT":
+		case upper == "NOT":
 			s.consume()
 			right, err := s.parsePrimary()
 			if err != nil {
 				return nil, err
 			}
 			left = FilterNotExpr{Include: left, Exclude: right}
-		case "OR", ")", "LIMIT", "SORT", "":
+		case components.IsBooleanBoundary(upper):
 			return left, nil
 		default:
 			right, err := s.parseNot()
@@ -277,7 +298,7 @@ func (s *state) parsePrimary() (Expr, error) {
 		return PhraseExpr{Text: text}, nil
 	}
 
-	node, ok, err := parseFieldExpression(tok)
+	node, ok, err := parseFieldExpressionWithRegistry(tok, s.registry)
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +334,10 @@ func (s *state) consume() string {
 }
 
 func parseFieldExpression(tok string) (Expr, bool, error) {
+	return parseFieldExpressionWithRegistry(tok, components.DefaultRegistry())
+}
+
+func parseFieldExpressionWithRegistry(tok string, registry *components.Registry) (Expr, bool, error) {
 	parts := strings.SplitN(tok, ":", 2)
 	if len(parts) != 2 {
 		return nil, false, nil
@@ -322,109 +347,40 @@ func parseFieldExpression(tok string) (Expr, bool, error) {
 	if field == "" || expr == "" {
 		return nil, false, fmt.Errorf("invalid field expression: %s", tok)
 	}
-
-	if strings.HasPrefix(expr, "[") || strings.HasPrefix(expr, "{") {
-		inclusive := strings.HasPrefix(expr, "[")
-		endBracket := "]"
-		if !inclusive {
-			endBracket = "}"
-		}
-		if !strings.HasSuffix(expr, endBracket) {
-			return nil, false, fmt.Errorf("invalid range syntax: %s", tok)
-		}
-		content := expr[1 : len(expr)-1]
-		lower, upper, ok := splitRangeBounds(content)
-		if !ok {
-			return nil, false, fmt.Errorf("range query must contain TO: %s", tok)
-		}
-		if lower == "" || upper == "" {
-			return nil, false, fmt.Errorf("invalid range bounds: %s", tok)
-		}
-		kind, err := inferRangeKind(lower, upper)
-		if err != nil {
-			return nil, false, fmt.Errorf("invalid range query %s: %w", tok, err)
-		}
-		return RangeExpr{Field: field, Lower: lower, Upper: upper, Kind: kind, Inclusive: inclusive}, true, nil
+	result, ok, err := registry.ParseFieldExpression(field, expr, tok)
+	if err != nil || !ok {
+		return nil, ok, err
 	}
-
-	if strings.Contains(expr, "?") {
-		return nil, false, fmt.Errorf("wildcard '?' is not supported: %s", tok)
-	}
-	if strings.Contains(expr, "*") {
-		if !strings.HasSuffix(expr, "*") || strings.Count(expr, "*") != 1 {
-			return nil, false, fmt.Errorf("only suffix '*' wildcard is supported: %s", tok)
-		}
-		prefix := strings.TrimSuffix(expr, "*")
-		if strings.TrimSpace(prefix) == "" {
-			return nil, false, fmt.Errorf("wildcard prefix cannot be empty: %s", tok)
-		}
-		return WildcardExpr{Field: field, Prefix: prefix}, true, nil
-	}
-
-	if strings.Contains(expr, "~") {
-		if !strings.HasSuffix(expr, "~1") {
-			return nil, false, fmt.Errorf("only fuzzy distance ~1 is supported: %s", tok)
-		}
-		term := strings.TrimSuffix(expr, "~1")
-		if strings.TrimSpace(term) == "" {
-			return nil, false, fmt.Errorf("fuzzy term cannot be empty: %s", tok)
-		}
-		return FuzzyExpr{Field: field, Term: term, Distance: 1}, true, nil
-	}
-
-	// 普通 field:value 词项
-	return TermExpr{Field: field, Value: strings.ToLower(expr)}, true, nil
+	return buildExprFromComponentResult(result)
 }
 
-func inferRangeKind(lower string, upper string) (RangeValueKind, error) {
-	if _, err := strconv.ParseFloat(lower, 64); err == nil {
-		if _, err := strconv.ParseFloat(upper, 64); err == nil {
-			return RangeValueNumber, nil
+func buildExprFromComponentResult(result components.FieldParseResult) (Expr, bool, error) {
+	switch result.Kind {
+	case components.ExprExists:
+		return ExistsExpr{Field: result.Field}, true, nil
+	case components.ExprPhrase:
+		return PhraseExpr{Field: result.Field, Text: result.Text}, true, nil
+	case components.ExprRange:
+		kind := RangeValueNumber
+		if result.ValueKind == "time" {
+			kind = RangeValueTime
 		}
+		return RangeExpr{
+			Field:     result.Field,
+			Lower:     result.Lower,
+			Upper:     result.Upper,
+			Kind:      kind,
+			Inclusive: result.Inclusive,
+		}, true, nil
+	case components.ExprWildcard:
+		return WildcardExpr{Field: result.Field, Prefix: result.Text}, true, nil
+	case components.ExprFuzzy:
+		return FuzzyExpr{Field: result.Field, Term: result.Text, Distance: result.Distance}, true, nil
+	case components.ExprTerm:
+		return TermExpr{Field: result.Field, Value: result.Text}, true, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported component result kind: %s", result.Kind)
 	}
-
-	if _, err := parseRangeTime(lower); err == nil {
-		if _, err := parseRangeTime(upper); err == nil {
-			return RangeValueTime, nil
-		}
-	}
-
-	return 0, fmt.Errorf("range supports only numeric/time bounds")
-}
-
-func parseRangeTime(value string) (time.Time, error) {
-	layouts := []string{
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		t, err := time.Parse(layout, value)
-		if err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unsupported time format: %s", value)
-}
-
-func splitRangeBounds(content string) (string, string, bool) {
-	fields := strings.Fields(content)
-	if len(fields) < 3 {
-		return "", "", false
-	}
-	toIdx := -1
-	for i, f := range fields {
-		if strings.EqualFold(f, "TO") {
-			toIdx = i
-			break
-		}
-	}
-	if toIdx <= 0 || toIdx >= len(fields)-1 {
-		return "", "", false
-	}
-	lower := strings.Join(fields[:toIdx], " ")
-	upper := strings.Join(fields[toIdx+1:], " ")
-	return lower, upper, true
 }
 
 func tokenize(s string) []string {
@@ -528,4 +484,58 @@ func tokenize(s string) []string {
 	flush()
 
 	return tokens
+}
+
+// splitRangeBounds 供 DSL 包内部测试与兼容逻辑复用。
+func splitRangeBounds(content string) (string, string, bool) {
+	fields := strings.Fields(content)
+	if len(fields) < 3 {
+		return "", "", false
+	}
+	toIdx := -1
+	for i, f := range fields {
+		if strings.EqualFold(f, "TO") {
+			toIdx = i
+			break
+		}
+	}
+	if toIdx <= 0 || toIdx >= len(fields)-1 {
+		return "", "", false
+	}
+	lower := strings.Join(fields[:toIdx], " ")
+	upper := strings.Join(fields[toIdx+1:], " ")
+	return lower, upper, true
+}
+
+// inferRangeKind 供 DSL 包内部测试与兼容逻辑复用。
+func inferRangeKind(lower string, upper string) (RangeValueKind, error) {
+	if _, err := strconv.ParseFloat(lower, 64); err == nil {
+		if _, err := strconv.ParseFloat(upper, 64); err == nil {
+			return RangeValueNumber, nil
+		}
+	}
+
+	if _, err := parseRangeTime(lower); err == nil {
+		if _, err := parseRangeTime(upper); err == nil {
+			return RangeValueTime, nil
+		}
+	}
+
+	return 0, fmt.Errorf("range supports only numeric/time bounds")
+}
+
+// parseRangeTime 供 DSL 包内部测试与兼容逻辑复用。
+func parseRangeTime(value string) (time.Time, error) {
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		t, err := time.Parse(layout, value)
+		if err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported time format: %s", value)
 }

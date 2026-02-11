@@ -56,11 +56,15 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
 	docIDMap := make(map[int64]int64)
+	hasIndexField := false
 	reader := ctx.Reader
 	for i := int64(1); i <= reader.DocCount(); i++ {
 		doc, err := reader.GetDocument(i)
 		if err != nil {
 			continue
+		}
+		if !hasIndexField && doc.Get("index") != nil {
+			hasIndexField = true
 		}
 		ramDocID, err := ramIdx.Add(doc)
 		if err != nil {
@@ -70,12 +74,13 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 	}
 
 	server := &Server{
-		idx:         ramIdx,
-		ctx:         ctx,
-		parser:      query.NewQueryParser(),
-		highlighter: highlight.NewHighlighter(),
-		sourceDocID: docIDMap,
-		port:        c.port,
+		idx:           ramIdx,
+		ctx:           ctx,
+		parser:        query.NewQueryParser(),
+		highlighter:   highlight.NewHighlighter(),
+		sourceDocID:   docIDMap,
+		hasIndexField: hasIndexField,
+		port:          c.port,
 	}
 
 	fmt.Printf("启动服务: http://localhost:%d\n", c.port)
@@ -94,12 +99,13 @@ func (c *ServeCommand) Execute(args []string, opts GlobalOptions) error {
 
 // Server HTTP 服务器。
 type Server struct {
-	idx         *index.RAMIndex
-	ctx         *IndexContext
-	parser      *query.QueryParser
-	highlighter *highlight.Highlighter
-	sourceDocID map[int64]int64
-	port        int
+	idx           *index.RAMIndex
+	ctx           *IndexContext
+	parser        *query.QueryParser
+	highlighter   *highlight.Highlighter
+	sourceDocID   map[int64]int64
+	hasIndexField bool
+	port          int
 }
 
 // Start 启动服务器。
@@ -160,6 +166,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	needDocView := includeDoc || len(fields) > 0
 	from := defaultPageFrom
 	size := defaultPageSize
+	fromExplicit := false
+	sizeExplicit := false
 
 	if fromParam := r.URL.Query().Get("from"); fromParam != "" {
 		parsedFrom, err := strconv.Atoi(fromParam)
@@ -168,6 +176,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		from = parsedFrom
+		fromExplicit = true
 	}
 	if sizeParam := r.URL.Query().Get("size"); sizeParam != "" {
 		parsedSize, err := strconv.Atoi(sizeParam)
@@ -180,15 +189,37 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		size = parsedSize
+		sizeExplicit = true
 	}
 	if q == "" {
 		http.Error(w, "缺少查询参数 q", http.StatusBadRequest)
 		return
 	}
 
-	parsedQuery, err := s.parser.Parse(q)
+	queryPlan, err := s.parser.ParsePlan(q)
 	if err != nil {
 		http.Error(w, "解析查询失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(queryPlan.Sort) > 0 {
+		http.Error(w, "SORT 语义尚未接入执行器", http.StatusBadRequest)
+		return
+	}
+	if queryPlan.Limit != nil {
+		if !fromExplicit {
+			from = queryPlan.Limit.From
+		}
+		if !sizeExplicit {
+			size = queryPlan.Limit.Size
+		}
+		if size > maxPageSize {
+			http.Error(w, "DSL LIMIT size 超过上限 200", http.StatusBadRequest)
+			return
+		}
+	}
+	parsedQuery, err := applyScopeQuery(queryPlan.Query, queryPlan.Scopes, s.hasIndexField, queryPlan.RequireIn)
+	if err != nil {
+		http.Error(w, "作用域执行失败: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 

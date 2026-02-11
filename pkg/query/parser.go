@@ -1,27 +1,40 @@
 package query
 
 import (
+	"fmt"
 	"maure/pkg/dsl"
 	"maure/pkg/index"
 )
 
 // QueryParser 将 DSL 查询字符串解析为执行计划。
 type QueryParser struct {
-	dslParser *dsl.Parser
+	engine  *dsl.Engine
+	adapter *DSLAdapter
 }
 
 // NewQueryParser 创建新的查询解析器。
 func NewQueryParser() *QueryParser {
-	return &QueryParser{dslParser: dsl.NewParser()}
+	adapter := NewDSLAdapter()
+	engine := dsl.NewEngine(
+		dsl.DefaultLexer{},
+		dsl.NewParser(),
+		dsl.NoopValidator{},
+		dsl.DefaultPlanner{},
+		adapter,
+	)
+	return &QueryParser{
+		engine:  engine,
+		adapter: adapter,
+	}
 }
 
 // ParsePlan 解析 DSL 并返回执行计划（包含版本、作用域、分页与排序元信息）。
 func (p *QueryParser) ParsePlan(s string) (*QueryPlan, error) {
-	parsed, err := p.dslParser.Parse(s)
+	exec, err := p.engine.BuildExecutable(s)
 	if err != nil {
 		return nil, err
 	}
-	return CompileDSL(parsed)
+	return exec.(*QueryPlan), nil
 }
 
 // Parse 解析 DSL 并返回可执行 Query，保留历史调用兼容。
@@ -32,6 +45,9 @@ func (p *QueryParser) Parse(s string) (Query, error) {
 	}
 	if plan == nil {
 		return nil, nil
+	}
+	if plan.RequireIn || len(plan.Scopes) > 0 || plan.Limit != nil || len(plan.Sort) > 0 {
+		return nil, fmt.Errorf("IN/LIMIT/SORT 需要执行 QueryPlan，当前执行路径未启用该元信息")
 	}
 	return plan.Query, nil
 }

@@ -101,6 +101,28 @@ func TestParser_FieldFuzzy(t *testing.T) {
 	}
 }
 
+func TestParser_FieldExists(t *testing.T) {
+	parser := NewQueryParser()
+	q, err := parser.Parse("title:*")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if _, ok := q.(*ExistsQuery); !ok {
+		t.Fatalf("expected ExistsQuery, got %T", q)
+	}
+}
+
+func TestParser_FieldPhrase(t *testing.T) {
+	parser := NewQueryParser()
+	q, err := parser.Parse(`title:"iphone 15"`)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if _, ok := q.(*PhraseQuery); !ok {
+		t.Fatalf("expected PhraseQuery, got %T", q)
+	}
+}
+
 func TestParser_RejectUnsupportedWildcard(t *testing.T) {
 	parser := NewQueryParser()
 	if _, err := parser.Parse("title:*phone"); err == nil {
@@ -204,5 +226,51 @@ func TestAdvancedQuery_NotFilter(t *testing.T) {
 	}
 	if len(results) != 2 {
 		t.Fatalf("expected 2 hits after NOT filter, got %d", len(results))
+	}
+}
+
+func TestTermQuery_FieldFilter(t *testing.T) {
+	idx := createAdvancedIndex(t)
+	defer idx.Close()
+
+	q := NewTermQuery("iphone").WithField("title")
+	results, err := q.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 doc in title field, got %d", len(results))
+	}
+
+	q = NewTermQuery("iphone").WithField("message")
+	results, err = q.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 docs in message field, got %d", len(results))
+	}
+}
+
+func TestPhraseQuery_FieldFilter(t *testing.T) {
+	idx := createAdvancedIndex(t)
+	defer idx.Close()
+
+	q := NewPhraseQuery("iphone", "15").WithField("title")
+	results, err := q.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 doc in title field, got %d", len(results))
+	}
+
+	q = NewPhraseQuery("iphone", "15").WithField("message")
+	results, err = q.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 docs in message field, got %d", len(results))
 	}
 }

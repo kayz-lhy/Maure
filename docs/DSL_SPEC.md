@@ -30,9 +30,10 @@ V1 支持：
 ## 3. 语法定义（EBNF）
 
 ```ebnf
-query          = [version] [scope] expr [page] [sort] ;
+query          = [version] [require_in] [scope] expr [page] [sort] ;
 
 version        = "@v" integer ;
+require_in     = "REQUIRE_IN" ;
 scope          = "IN" scope_item {"," scope_item} ;
 scope_item     = ident "(" string_lit ")" ;
 
@@ -104,6 +105,11 @@ ident          = letter { letter | digit | "_" | "-" } ;
 1. `IN index("a")` 表示索引路由过滤。
 2. 可写多个：`IN index("a"),index("b")`。
 3. 若作用域不可用（未实现多索引路由），应返回明确错误而非静默忽略。
+
+### 4.8 可选约束 REQUIRE_IN
+1. `REQUIRE_IN` 为可选约束，声明后必须显式携带 `IN index("...")`。
+2. 若声明 `REQUIRE_IN` 但缺少 `IN`，应返回明确错误。
+3. 若声明 `REQUIRE_IN` 且执行器无法完成作用域过滤（例如文档无 `index` 字段），应返回明确错误。
 
 ---
 
@@ -180,3 +186,18 @@ ident          = letter { letter | digit | "_" | "-" } ;
 6. 更新 `docs/CLI_API_REFERENCE.md` 示例。
 7. 在 PR 描述中标注：语法变更、兼容影响、回滚方案。
 
+---
+
+## 11. DSL 模块架构（解耦版）
+
+当前实现采用四层结构：
+1. `pkg/dsl/contracts.go`：抽象层（Lexer/ParserDef/Validator/Planner/Compiler）。
+2. `pkg/dsl/pipeline.go`：主体层（Engine 管线编排）。
+3. `pkg/dsl/components/*.go`：组件层（term/phrase/range/wildcard/fuzzy/exists/boolean/meta）。
+4. `pkg/query/dsl_adapter.go`：适配层（Plan -> QueryPlan/Query）。
+
+扩展新语法时请遵循：
+1. 在 `pkg/dsl/components/` 新增组件并注册到 `DefaultRegistry()`。
+2. 在 `pkg/dsl/parser.go` 的组件结果映射中补充 AST 转换。
+3. 在 `pkg/query/dsl_adapter.go` 注册并实现对应编译器。
+4. 补齐组件测试、pipeline 测试、adapter 测试及回归样例。

@@ -78,6 +78,7 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 	// 创建内存索引
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
 	docIDMap := make(map[int64]int64)
+	hasIndexField := false
 
 	// 加载现有文档
 	reader := ctx.Reader
@@ -86,6 +87,9 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		if err != nil {
 			continue
 		}
+		if !hasIndexField && doc.Get("index") != nil {
+			hasIndexField = true
+		}
 		ramDocID, err := ramIdx.Add(doc)
 		if err != nil {
 			continue
@@ -93,10 +97,25 @@ func (c *SearchCommand) Execute(args []string, opts GlobalOptions) error {
 		docIDMap[ramDocID] = i
 	}
 
-	// 解析查询
-	parsedQuery, err := query.NewQueryParser().Parse(queryStr)
+	// 解析查询计划（DSL + 元信息）
+	queryParser := query.NewQueryParser()
+	queryPlan, err := queryParser.ParsePlan(queryStr)
 	if err != nil {
 		ExitWithError(fmt.Errorf("解析查询失败: %w", err))
+	}
+	if len(queryPlan.Sort) > 0 {
+		ExitWithError(fmt.Errorf("SORT 语义尚未接入执行器"))
+	}
+	if queryPlan.Limit != nil {
+		c.from = queryPlan.Limit.From
+		c.size = queryPlan.Limit.Size
+		if c.size > 200 {
+			ExitWithError(fmt.Errorf("DSL LIMIT size 超过上限 200"))
+		}
+	}
+	parsedQuery, err := applyScopeQuery(queryPlan.Query, queryPlan.Scopes, hasIndexField, queryPlan.RequireIn)
+	if err != nil {
+		ExitWithError(fmt.Errorf("作用域执行失败: %w", err))
 	}
 
 	if parsedQuery == nil {
@@ -262,20 +281,31 @@ func (c *CountCommand) Execute(args []string, opts GlobalOptions) error {
 	defer ctx.Close()
 
 	ramIdx := index.NewRAMIndex(ctx.Analyzer)
+	hasIndexField := false
 	reader := ctx.Reader
 	for i := int64(1); i <= reader.DocCount(); i++ {
 		doc, err := reader.GetDocument(i)
 		if err != nil {
 			continue
 		}
+		if !hasIndexField && doc.Get("index") != nil {
+			hasIndexField = true
+		}
 		if _, err := ramIdx.Add(doc); err != nil {
 			continue
 		}
 	}
 
-	parsedQuery, err := query.NewQueryParser().Parse(queryStr)
+	queryPlan, err := query.NewQueryParser().ParsePlan(queryStr)
 	if err != nil {
 		ExitWithError(fmt.Errorf("解析查询失败: %w", err))
+	}
+	if queryPlan.Limit != nil || len(queryPlan.Sort) > 0 {
+		ExitWithError(fmt.Errorf("count 暂不支持 LIMIT/SORT 语义"))
+	}
+	parsedQuery, err := applyScopeQuery(queryPlan.Query, queryPlan.Scopes, hasIndexField, queryPlan.RequireIn)
+	if err != nil {
+		ExitWithError(fmt.Errorf("作用域执行失败: %w", err))
 	}
 
 	if parsedQuery == nil {

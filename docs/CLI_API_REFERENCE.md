@@ -1,5 +1,22 @@
 # CLI / API 参考
 
+## DSL 说明（V1）
+
+查询语法由独立 DSL 管线处理：`contracts -> pipeline -> components -> query adapter`。  
+常用示例：
+
+```text
+price:[100 TO 300] AND title:iph*
+name:roam~1 OR title:iph*
+field:*      # 字段存在查询
+```
+
+说明：
+
+- `IN index("...")`、`LIMIT`、`SORT BY` 已进入 QueryPlan 元信息；
+- `REQUIRE_IN` 可选约束已支持：声明后必须配合 `IN index("...")`；
+- 若调用路径未消费该元信息，会返回明确错误，不会静默忽略。
+
 ## HTTP API
 
 ### 搜索接口

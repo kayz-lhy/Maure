@@ -59,6 +59,7 @@ func buildTestServer(t *testing.T) *Server {
 	doc1.Add(document.NewTextField("message", "alpha request failed"))
 	doc1.Add(document.NewStringField("level", "error"))
 	doc1.Add(document.NewStringField("service", "api"))
+	doc1.Add(document.NewStringField("index", "app"))
 	id1, err := idx.Add(doc1)
 	if err != nil {
 		t.Fatalf("add doc1 failed: %v", err)
@@ -70,6 +71,7 @@ func buildTestServer(t *testing.T) *Server {
 	doc2.SetID("doc-2")
 	doc2.Add(document.NewTextField("message", "alpha request retry"))
 	doc2.Add(document.NewStringField("level", "warn"))
+	doc2.Add(document.NewStringField("index", "ops"))
 	id2, err := idx.Add(doc2)
 	if err != nil {
 		t.Fatalf("add doc2 failed: %v", err)
@@ -82,6 +84,7 @@ func buildTestServer(t *testing.T) *Server {
 		parser:      query.NewQueryParser(),
 		highlighter: highlight.NewHighlighter(),
 		sourceDocID: source,
+		hasIndexField: true,
 		ctx: &IndexContext{
 			Reader: &mockIndexReader{docs: readerDocs},
 		},
@@ -154,5 +157,25 @@ func TestHandleSearchInvalidFieldsReturnsBadRequest(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestHandleSearchScopeIndexFilter(t *testing.T) {
+	s := buildTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/search?q=%40v1+IN+index%28%22app%22%29+alpha", nil)
+	rr := httptest.NewRecorder()
+	s.handleSearch(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp searchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected 1 hit after IN index filter, got %d", len(resp.Results))
 	}
 }

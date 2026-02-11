@@ -1,8 +1,11 @@
 package query
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"maure/pkg/analyzer"
+	"maure/pkg/document"
 	"maure/pkg/index"
 	mauresearch "maure/pkg/search"
 	"maure/pkg/store"
@@ -52,6 +55,9 @@ func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc
 	inv := idx.Inverted()
 	postings, err := inv.GetPostings(q.Term)
 	if err != nil {
+		if errors.Is(err, index.ErrDocNotFound) || errors.Is(err, store.ErrDocNotFound) {
+			return []index.ScoreDoc{}, nil
+		}
 		return nil, err
 	}
 
@@ -95,6 +101,17 @@ func (q *TermQuery) searchInternal(idx *index.RAMIndex, n int) ([]index.ScoreDoc
 
 	for i, docID := range postings.DocIDs {
 		termFreq := postings.Freqs[i]
+		if q.Field != "" {
+			doc, err := idx.GetDocument(docID)
+			if err != nil || doc == nil {
+				continue
+			}
+			if !docMatchesFieldTermPredicate(doc, q.Field, idx.Analyzer(), func(t string) bool {
+				return strings.EqualFold(t, q.Term)
+			}) {
+				continue
+			}
+		}
 		if useTopN && useBM25 && collector.Full() {
 			tf := float32(termFreq)
 			// BM25 上界：假设最理想文档长度，若上界都进不了 Top-K，则跳过精确打分。
@@ -160,6 +177,7 @@ type PhraseQuery struct {
 	terms []string
 	slop  int // 词项之间的最大距离
 	boost float32
+	field string
 }
 
 // NewPhraseQuery 创建新的短语查询。
@@ -188,6 +206,12 @@ func (q *PhraseQuery) WithBoost(boost float32) *PhraseQuery {
 	return q
 }
 
+// WithField 将短语查询限制到指定字段。
+func (q *PhraseQuery) WithField(field string) *PhraseQuery {
+	q.field = field
+	return q
+}
+
 // Search 实现了 Query 接口。
 func (q *PhraseQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 	if len(q.terms) == 0 {
@@ -198,6 +222,9 @@ func (q *PhraseQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 	firstTerm := q.terms[0]
 	postings, err := idx.Inverted().GetPostings(firstTerm)
 	if err != nil {
+		if errors.Is(err, index.ErrDocNotFound) || errors.Is(err, store.ErrDocNotFound) {
+			return []index.ScoreDoc{}, nil
+		}
 		return nil, err
 	}
 
@@ -213,6 +240,16 @@ func (q *PhraseQuery) Search(idx *index.RAMIndex) ([]index.ScoreDoc, error) {
 
 		// 检查短语匹配
 		if q.matchPhraseInDoc(idx, docID, firstPositions) {
+			if q.field != "" {
+				doc, err := idx.GetDocument(docID)
+				if err != nil || doc == nil {
+					continue
+				}
+				if !docMatchesFieldPhrase(doc, q.field, q.terms, idx.Analyzer()) {
+					continue
+				}
+			}
+
 			// 计算评分
 			termFreq := postings.Freqs[i]
 			docLength := idx.Inverted().FieldLength(docID)
@@ -300,6 +337,53 @@ func (q *PhraseQuery) Explain(idx *index.RAMIndex) string {
 	}
 	result += ")"
 	return result
+}
+
+func docMatchesFieldPhrase(doc *document.Document, fieldName string, phraseTerms []string, a analyzer.Analyzer) bool {
+	if len(phraseTerms) == 0 {
+		return false
+	}
+	for _, field := range doc.GetAll(fieldName) {
+		if !field.Tokenized {
+			content := strings.ToLower(field.StringValue())
+			phrase := strings.Join(phraseTerms, " ")
+			if strings.Contains(content, phrase) {
+				return true
+			}
+			continue
+		}
+
+		stream := a.Analyze(field.Name, field.StringValue())
+		fieldTerms := make([]string, 0, len(phraseTerms)*2)
+		for stream.Next() {
+			fieldTerms = append(fieldTerms, strings.ToLower(stream.Current().Text))
+		}
+		stream.Close()
+		if containsTermSequence(fieldTerms, phraseTerms) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTermSequence(fieldTerms []string, phraseTerms []string) bool {
+	if len(phraseTerms) == 0 || len(fieldTerms) < len(phraseTerms) {
+		return false
+	}
+	lastStart := len(fieldTerms) - len(phraseTerms)
+	for i := 0; i <= lastStart; i++ {
+		matched := true
+		for j := 0; j < len(phraseTerms); j++ {
+			if fieldTerms[i+j] != phraseTerms[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func queryBetterScoreDoc(a, b index.ScoreDoc) bool {

@@ -20,6 +20,9 @@ func TestExprNodeMethodsAndKeyword(t *testing.T) {
 	if got := normalizeKeyword("and"); got != "AND" {
 		t.Fatalf("normalize keyword failed: %s", got)
 	}
+	if got := normalizeKeyword("require_in"); got != "REQUIRE_IN" {
+		t.Fatalf("normalize REQUIRE_IN failed: %s", got)
+	}
 	if got := normalizeKeyword("custom"); got != "custom" {
 		t.Fatalf("normalize non-keyword failed: %s", got)
 	}
@@ -234,7 +237,6 @@ func TestParseFieldExpressionDirect(t *testing.T) {
 		"f:[1 TO ]",
 		"f:[x TO y]",
 		"f:a?b",
-		"f:*",
 		"f:*abc",
 		"f:a*b",
 		"f:~1",
@@ -286,6 +288,14 @@ func TestParseFieldExpressionDirect(t *testing.T) {
 	te, ok := node.(TermExpr)
 	if !ok || te.Value != "abc" {
 		t.Fatalf("expected lowercased term, got %#v", node)
+	}
+
+	node, ok, err = parseFieldExpression("f:*")
+	if err != nil || !ok {
+		t.Fatalf("expected exists success: %v", err)
+	}
+	if _, ok := node.(ExistsExpr); !ok {
+		t.Fatalf("expected exists node")
 	}
 }
 

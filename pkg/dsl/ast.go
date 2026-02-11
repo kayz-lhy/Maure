@@ -5,10 +5,12 @@ import "strings"
 // ParsedQuery 是 DSL 解析结果，表达式与可选元信息分离。
 type ParsedQuery struct {
 	Version int
-	Scopes  []Scope
-	Expr    Expr
-	Limit   *LimitClause
-	Sort    []SortClause
+	// RequireIn 表示查询声明了强制 IN 约束。
+	RequireIn bool
+	Scopes    []Scope
+	Expr      Expr
+	Limit     *LimitClause
+	Sort      []SortClause
 }
 
 // Scope 表示查询作用域，例如 index("app")。
@@ -86,6 +88,13 @@ type FuzzyExpr struct {
 
 func (FuzzyExpr) exprNode() {}
 
+// ExistsExpr 是字段存在表达式，例如 field:* 。
+type ExistsExpr struct {
+	Field string
+}
+
+func (ExistsExpr) exprNode() {}
+
 // AndExpr 是布尔与表达式。
 type AndExpr struct {
 	Left  Expr
@@ -119,7 +128,7 @@ func (FilterNotExpr) exprNode() {}
 
 func normalizeKeyword(token string) string {
 	upper := strings.ToUpper(token)
-	if upper == "AND" || upper == "OR" || upper == "NOT" || upper == "IN" || upper == "LIMIT" || upper == "SORT" || upper == "BY" || upper == "ASC" || upper == "DESC" || upper == "TO" {
+	if upper == "AND" || upper == "OR" || upper == "NOT" || upper == "IN" || upper == "LIMIT" || upper == "SORT" || upper == "BY" || upper == "ASC" || upper == "DESC" || upper == "TO" || upper == "REQUIRE_IN" {
 		return upper
 	}
 	return token

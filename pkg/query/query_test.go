@@ -80,6 +80,34 @@ func TestTermQuery_Search_NoDuplicateDocIDs(t *testing.T) {
 	}
 }
 
+func TestTermQuery_Search_MissingTermReturnsEmpty(t *testing.T) {
+	idx := createTestIndex(t)
+	defer idx.Close()
+
+	query := NewTermQuery("term-not-exists")
+	results, err := query.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestPhraseQuery_Search_MissingFirstTermReturnsEmpty(t *testing.T) {
+	idx := createTestIndex(t)
+	defer idx.Close()
+
+	query := NewPhraseQuery("iphon~1")
+	results, err := query.Search(idx)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
 func TestDisjunctionQuery_OR(t *testing.T) {
 	idx := createTestIndex(t)
 	defer idx.Close()
